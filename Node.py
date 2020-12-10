@@ -1,27 +1,26 @@
+import numpy as np
 from cylp.cy import CyClpSimplex
 from cylp.py.modeling.CyLPModel import CyLPArray
-import numpy as np
 
 
 class Node():
-    def __init__(self, cylp=None):
+    def __init__(self, model, cylp=None):
         self.cylp = cylp
+        self.model = model
 
-    def cylp_init(self, A, b, c, l, u):
+    def cylp_init(self, A, b_l, b_u, c, l, u):
         model = CyClpSimplex()
         x = model.addVariable('x', len(c))
-        A = np.matrix(A)
-        b = np.matrix(b)
         l = CyLPArray(l)
         u = CyLPArray(u)
         c = CyLPArray(c)
-        model += (A * x <= b)
+        model += (-10000 <= A * x <= b_u)
         model += l <= x <= u
         model.objective = c * x
         self.cylp = model
 
     def primal_solve(self):
-        self.cylp.primal()
+        self.cylp.primal(startFinishOptions='x')
 
     def dual_solve(self):
         self.cylp.dual()
@@ -38,3 +37,10 @@ class Node():
 
     def check_feasility(self):
         return self.cylp.getStatusCode() == 0
+
+    def check_int(self):
+        primal_value = self.get_primalVariableSolution()
+        int_vars = primal_value[self.model.int_index_array]
+        if np.max(np.abs(np.round(int_vars) - int_vars)) < self.model.episilon:
+            return True
+        return False
