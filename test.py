@@ -18,6 +18,14 @@ l = np.array([0, 0.])
 u = np.array([10000, 10000])
 type = np.array([1, 1])
 
+A = np.matrix([[1, 2], [2, -4], [-2, 1], [3, 1]])
+b_l = np.matrix([-10000, -10000, -10000, -10000])
+b_u = np.matrix([26, 9, -5, 42])
+c = np.array([-7, -10])
+l = np.array([0, 1.5])
+u = np.array([10000, 10000])
+type = np.array([1, 1])
+
 option = {'algorithm': "Cutting Plane", "Cutting": "GomoryMIR"}
 option = {"Branch": "MostFractional", "NodeSelection": "BestFirst", 'algorithm': "Branch and Bound"}
 test_problem = Model(A, b_l, b_u, c, l, u, type)
