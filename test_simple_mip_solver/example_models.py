@@ -23,7 +23,7 @@ lp = CyClpSimplex()
 
 A = np.matrix([[1, 0, 1],
                [0, 1, 0]])
-b = CyLPArray([1.5, 1.5])
+b = CyLPArray([1.5, 1.25])
 c = CyLPArray([1, 1, 1])
 l = CyLPArray([0, 0, 0])
 

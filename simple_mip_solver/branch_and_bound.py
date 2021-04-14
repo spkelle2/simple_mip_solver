@@ -1,7 +1,7 @@
 from coinor.cuppy.milpInstance import MILPInstance
 from math import floor
 from operator import attrgetter
-from typing import Dict, Tuple, List
+from typing import List
 
 from simple_mip_solver import Node
 
@@ -12,120 +12,90 @@ class BranchAndBound:
 
     def __init__(self, model: MILPInstance):
         assert isinstance(model, MILPInstance), 'model must be cuppy MILPInstance'
-        self.global_upper_bound = float('inf')
-        self.global_lower_bound = -float('inf')
-        self.best_solution = None
-        self.nodes = []
+        self._global_upper_bound = float('inf')
+        self._global_lower_bound = -float('inf')
+        self._best_solution = None
+        self._nodes = []
         self.model = model
+        self.solution = None
+        self.status = 'unsolved'
+        self.objective_value = None
+        self._current_node = None
 
-    def solve(self) -> Tuple[int, Dict[int, float], float]:
+    def solve(self) -> None:
         """Solves the Branch and Bound algorithm
 
-        :return: status code, the variable keys and values in the best solution,
-        and the best objective value
+        :return:
         """
-        self.nodes.append(Node(self.model, self.global_lower_bound))
+        self._nodes.append(Node(self.model, self._global_lower_bound))
 
-        while self.nodes:
+        while self._nodes:
             self._evaluate_next_node()
 
-        return 0 if self.best_solution else -1, self.best_solution, \
-            self.global_upper_bound
+        self.status = 'optimal' if self._best_solution else 'infeasible'
+        self.solution = self._best_solution
+        self.objective_value = self._global_upper_bound
 
     def _evaluate_next_node(self) -> None:
-        """Solves one iteration of the branch and bound algorithm
+        """Solves one node of the branch and bound algorithm
 
         :return:
         """
         # select best first
-        current_node = self._least_lower_bound()
-        self.nodes.remove(current_node)
-        current_node.solve()
+        self._current_node = self._least_lower_bound()
+        self._nodes.remove(self._current_node)
+        self._current_node.solve()
 
         # do nothing if node infeasible or worse than the existing bound
-        if current_node.lp_feasible and current_node.obj < self.global_upper_bound:
-            if current_node.mip_feasible:
-                self.best_solution = current_node.solution
-                self.global_upper_bound = current_node.obj
+        if self._current_node.lp_feasible and self._current_node.objective_value < self._global_upper_bound:
+            if self._current_node.mip_feasible:
+                self._best_solution = self._current_node.solution
+                self._global_upper_bound = self._current_node.objective_value
                 # only keep nodes that give us a chance to find better solutions
-                self.nodes = [n for n in self.nodes if n.lower_bound <
-                              self.global_upper_bound]
+                self._nodes = [n for n in self._nodes if n.lower_bound <
+                               self._global_upper_bound]
             else:
-                self.nodes.extend(branch(current_node))
-                self.global_lower_bound = min(n.lower_bound for n in self.nodes)
+                idx = self._current_node.most_fractional_index
+                self._nodes.extend(self._branch(idx))
+                self._global_lower_bound = min(n.lower_bound for n in self._nodes)
 
-    def _branch(self, node: Node) -> List[Node]:
-        """ Returns two nodes that are branched by the current node's most fractional
-        value. Returns nothing if the current node is a feasible mip. Right now
-        this function is kinda unnecessary but it provides the structure for
-        adding multiple branching strategies in the future.
-
-        :param model: object containing initial parameters for the problem being solved
-        :param node: object representing where in the branch and bound tree we are
-        :return: list of Nodes with the new bounds
-        """
-        assert isinstance(node, Node), 'node must be a Node instance'
-        idx = _find_most_fractional_index(model, node)
-        if idx:
-            return _create_nodes(model, node, idx)
-        else:
-            return []
-
-    def _find_most_fractional_index(self, node: Node) -> int:
-        """ Returns the index of the integer variable with current value furthest from
-        being integer. If one does not exist, returns None.
-
-        :param model: object containing initial parameters for the problem being solved
-        :param node: object representing where in the branch and bound tree we are
-        :return furthest_index: index corresponding to variable with most fractional
-        value
-        """
-        assert isinstance(node, Node), 'node must be a Node instance'
-        furthest_index = None
-        furthest_dist = 0
-        for idx in model.integerIndices:
-            dist = abs(node.solution[idx] - (floor(node.solution[idx]) + 0.5))
-            if dist > furthest_dist:
-                furthest_dist = dist
-                furthest_index = idx
-        return furthest_index
-
-    def _create_nodes(self, node: Node, index: int) -> List[Node]:
+    def _branch(self, index: int) -> List[Node]:
         """ Creates two new copies of the node with new bounds placed on the variable
         with given index, one with the variable's lower bound set to the next integer
         above its current value and another with the variable's upper bound set to
         the integer immediately below its current value.
 
-        :param model: object containing initial parameters for the problem being solved
-        :param node: object representing where in the branch and bound tree we are
         :param index: index of variable to branch on
         :return: list of Nodes with the new bounds
         """
-        assert isinstance(node, Node), 'node must be a Node instance'
         assert isinstance(index, int), 'index must be an integer'
-        int_value = floor(node.solution[index])
+        assert 0 <= index < self._current_node.model.numVars, 'index must match a variable'
+        assert self._current_node.lp_feasible, 'must have solved to set bounds'
 
+        int_value = floor(self._current_node.solution[index])
         # in one branch set upper bound for index as floor
-        u = node.model.lp.variablesUpper.copy()
+        u = self._current_node.model.lp.variablesUpper.copy()
         u[index] = int_value
-        left_model = MILPInstance(A=node.model.A, b=node.model.b, c=node.model.c,
-                                  l=node.model.l, u=u,
-                                  integerIndices=node.model.integerIndices)
+        left_model = MILPInstance(
+            A=self._current_node.model.A, b=self._current_node.model.b,
+            c=self._current_node.model.c, l=self._current_node.model.l, u=u,
+            integerIndices=self._current_node.model.integerIndices)
 
         # in other branch set lower bound for same index as ceiling
-        l = node.model.lp.variablesLower.copy()
+        l = self._current_node.model.lp.variablesLower.copy()
         l[index] = int_value + 1
-        right_model = MILPInstance(A=node.model.A, b=node.model.b, c=node.model.c,
-                                   l=l, u=node.model.u,
-                                   integerIndices=node.model.integerIndices)
+        right_model = MILPInstance(
+            A=self._current_node.model.A, b=self._current_node.model.b,
+            c=self._current_node.model.c, l=l, u=self._current_node.model.u,
+            integerIndices=self._current_node.model.integerIndices)
 
-        return [Node(left_model, node.obj), Node(right_model, node.obj)]
+        return [Node(left_model, self._current_node.objective_value),
+                Node(right_model, self._current_node.objective_value)]
 
-    def _least_lower_bound(nodes: List[Node]) -> Node:
+    def _least_lower_bound(self) -> Node:
         """ Finds the node with the least lower bound
 
         :param nodes: list of nodes representing where in the branch and bound tree we are
         :return: node with the least lower bound
         """
-        assert all(isinstance(n, Node) for n in nodes), 'must have a list of nodes'
-        return min(nodes, key=attrgetter('lower_bound'))
+        return min(self._nodes, key=attrgetter('lower_bound'))
