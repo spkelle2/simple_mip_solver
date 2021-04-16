@@ -1,5 +1,3 @@
-from coinor.cuppy.milpInstance import MILPInstance
-from cylp.cy import CyClpSimplex
 import unittest
 
 from simple_mip_solver import Node
