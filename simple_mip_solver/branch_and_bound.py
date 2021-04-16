@@ -1,4 +1,5 @@
 from coinor.cuppy.milpInstance import MILPInstance
+from cylp.cy import CyClpSimplex
 from math import floor
 from operator import attrgetter
 from typing import List
@@ -21,18 +22,20 @@ class BranchAndBound:
         self.status = 'unsolved'
         self.objective_value = None
         self._current_node = None
+        self._iteration = 0
 
     def solve(self) -> None:
         """Solves the Branch and Bound algorithm
 
         :return:
         """
-        self._nodes.append(Node(self.model, self._global_lower_bound))
+        self._nodes.append(Node(self.model.lp, self.model.integerIndices,
+                                self._global_lower_bound))
 
         while self._nodes:
             self._evaluate_next_node()
 
-        self.status = 'optimal' if self._best_solution else 'infeasible'
+        self.status = 'optimal' if self._best_solution is not None else 'infeasible'
         self.solution = self._best_solution
         self.objective_value = self._global_upper_bound
 
@@ -47,7 +50,8 @@ class BranchAndBound:
         self._current_node.solve()
 
         # do nothing if node infeasible or worse than the existing bound
-        if self._current_node.lp_feasible and self._current_node.objective_value < self._global_upper_bound:
+        if self._current_node.lp_feasible and self._current_node.objective_value \
+                < self._global_upper_bound:
             if self._current_node.mip_feasible:
                 self._best_solution = self._current_node.solution
                 self._global_upper_bound = self._current_node.objective_value
@@ -69,33 +73,38 @@ class BranchAndBound:
         :return: list of Nodes with the new bounds
         """
         assert isinstance(index, int), 'index must be an integer'
-        assert 0 <= index < self._current_node.model.numVars, 'index must match a variable'
+        assert index in self.model.integerIndices, 'index must match an integer variable'
         assert self._current_node.lp_feasible, 'must have solved to set bounds'
-
         int_value = floor(self._current_node.solution[index])
+
         # in one branch set upper bound for index as floor
-        u = self._current_node.model.lp.variablesUpper.copy()
+        u = self._current_node.lp.variablesUpper.copy()
         u[index] = int_value
-        left_model = MILPInstance(
-            A=self._current_node.model.A, b=self._current_node.model.b,
-            c=self._current_node.model.c, l=self._current_node.model.l, u=u,
-            integerIndices=self._current_node.model.integerIndices)
+        left_lp = CyClpSimplex()
+        left_lp.loadProblem(
+            self._current_node.lp.matrix, self._current_node.lp.variablesLower,
+            u, self._current_node.lp.objective, self._current_node.lp.constraintsLower,
+            self._current_node.lp.constraintsUpper
+        )
 
         # in other branch set lower bound for same index as ceiling
-        l = self._current_node.model.lp.variablesLower.copy()
+        l = self._current_node.lp.variablesLower.copy()
         l[index] = int_value + 1
-        right_model = MILPInstance(
-            A=self._current_node.model.A, b=self._current_node.model.b,
-            c=self._current_node.model.c, l=l, u=self._current_node.model.u,
-            integerIndices=self._current_node.model.integerIndices)
+        right_lp = CyClpSimplex()
+        right_lp.loadProblem(
+            self._current_node.lp.matrix, l, self._current_node.lp.variablesUpper,
+            self._current_node.lp.objective, self._current_node.lp.constraintsLower,
+            self._current_node.lp.constraintsUpper
+        )
 
-        return [Node(left_model, self._current_node.objective_value),
-                Node(right_model, self._current_node.objective_value)]
+        return [Node(left_lp, self.model.integerIndices,
+                     self._current_node.objective_value),
+                Node(right_lp, self.model.integerIndices,
+                     self._current_node.objective_value)]
 
     def _least_lower_bound(self) -> Node:
         """ Finds the node with the least lower bound
 
-        :param nodes: list of nodes representing where in the branch and bound tree we are
         :return: node with the least lower bound
         """
         return min(self._nodes, key=attrgetter('lower_bound'))

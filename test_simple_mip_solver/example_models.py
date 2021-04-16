@@ -1,12 +1,9 @@
 from coinor.cuppy.milpInstance import MILPInstance
-from cylp.cy import CyClpSimplex
 from cylp.py.modeling.CyLPModel import CyLPArray
 import numpy as np
 
 
 # ----------------- a model with MIP feasible LP relaxation -----------------
-lp = CyClpSimplex()
-
 A = np.matrix([[1, 0, 0],
                [0, 1, 0],
                [0, 0, 1]])
@@ -19,8 +16,6 @@ no_branch = MILPInstance(A=A, b=b, c=c, l=l, sense=['Max', '<='],
 
 
 # ----------- a small model that needs to branch to solve the MIP -----------
-lp = CyClpSimplex()
-
 A = np.matrix([[1, 0, 1],
                [0, 1, 0]])
 b = CyLPArray([1.5, 1.25])
@@ -32,8 +27,6 @@ small_branch = MILPInstance(A=A, b=b, c=c, l=l, sense=['Max', '<='],
 
 
 # ------------------------ a model that is infeasible ------------------------
-lp = CyClpSimplex()
-
 A = np.matrix([[1, 1, 0]])
 b = CyLPArray([-1])
 c = CyLPArray([1, 1, 0])
