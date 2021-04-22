@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from cylp.cy import CyClpSimplex
 from math import floor
 import numpy as np
@@ -7,8 +9,9 @@ epsilon = .0001
 
 
 class Node:
+
     def __init__(self, lp: CyClpSimplex, integerIndices: List[int],
-                 lower_bound: Union[float, int]=-float('inf')):
+                 lower_bound: Union[float, int] = -float('inf')):
         assert isinstance(lp, CyClpSimplex), 'lp must be CyClpSimplex instance'
         assert all(0 <= idx < lp.nVariables for idx in integerIndices), \
             'indices must match variables'
@@ -56,3 +59,41 @@ class Node:
                 furthest_dist = dist
                 furthest_index = idx
         return furthest_index
+
+    def branch(self) -> List[Node]:
+        """ Creates two new copies of the node with new bounds placed on the variable
+        with given index, one with the variable's lower bound set to the next integer
+        above its current value and another with the variable's upper bound set to
+        the integer immediately below its current value.
+
+        :return: list of Nodes with the new bounds
+        """
+        assert self.lp_feasible, 'must have solved to set bounds'
+        index = self.most_fractional_index
+        assert index, 'we must have a fractional index to branch'
+        int_value = floor(self.solution[index])
+
+        # in one branch set upper bound for index as floor
+        u = self.lp.variablesUpper.copy()
+        u[index] = int_value
+        left_lp = CyClpSimplex()
+        left_lp.loadProblem(
+            self.lp.matrix, self.lp.variablesLower,
+            u, self.lp.objective, self.lp.constraintsLower,
+            self.lp.constraintsUpper
+        )
+
+        # in other branch set lower bound for same index as ceiling
+        l = self.lp.variablesLower.copy()
+        l[index] = int_value + 1
+        right_lp = CyClpSimplex()
+        right_lp.loadProblem(
+            self.lp.matrix, l, self.lp.variablesUpper,
+            self.lp.objective, self.lp.constraintsLower,
+            self.lp.constraintsUpper
+        )
+
+        return [Node(left_lp, self.integerIndices,
+                     self.objective_value),
+                Node(right_lp, self.integerIndices,
+                     self.objective_value)]
