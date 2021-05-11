@@ -27,7 +27,7 @@ class Node:
         self.lp_feasible = None
         self.mip_feasible = None
 
-    def solve(self) -> None:
+    def bound(self) -> None:
         """Solve the current node with simplex. Save the run solution.
 
         :return:
@@ -60,6 +60,7 @@ class Node:
                 furthest_index = idx
         return furthest_index
 
+    # inherit and overwrite to make your own branching rule
     def branch(self) -> List[Node]:
         """ Creates two new copies of the node with new bounds placed on the variable
         with given index, one with the variable's lower bound set to the next integer
@@ -68,9 +69,9 @@ class Node:
 
         :return: list of Nodes with the new bounds
         """
-        assert self.lp_feasible, 'must have solved to set bounds'
+        assert self.lp_feasible, 'must solve before branching'
         index = self.most_fractional_index
-        assert index, 'we must have a fractional index to branch'
+        assert index is not None, 'must have fractional index to branch'
         int_value = floor(self.solution[index])
 
         # in one branch set upper bound for index as floor
@@ -97,3 +98,19 @@ class Node:
                      self.objective_value),
                 Node(right_lp, self.integerIndices,
                      self.objective_value)]
+
+    def __eq__(self, other):
+        if isinstance(other, Node):
+            return self.lower_bound == other.lower_bound
+        else:
+            raise TypeError('A Node can only be compared with another Node')
+
+    # inherit and overwrite to make your own priority rule
+    def __lt__(self, other):
+        if isinstance(other, Node):
+            return self.lower_bound < other.lower_bound
+        else:
+            raise TypeError('A Node can only be compared with another Node')
+
+    def __repr__(self):
+        return f'node with bound {self.lower_bound}'

@@ -1,45 +1,45 @@
 from coinor.cuppy.milpInstance import MILPInstance
-from coinor.gimpy.tree import BinaryTree
 import inspect
 from typing import Any
 
-from simple_mip_solver import Node, PriorityQueue
+from simple_mip_solver import Node
+from queue import PriorityQueue
 
 
-class BranchAndBound(BinaryTree):
+class BranchAndBound:
     """Class used to solve Mixed Integer Linear Programs with the Branch and
     Bound algorithm"""
 
-    def __init__(self, model: MILPInstance, node_class: Any = Node,
-                 node_queue: Any = PriorityQueue('lower_bound'), **attrs):
-        super().__init__(**attrs)
+    def __init__(self, model: MILPInstance, Node: Any = Node,
+                 node_queue: Any = None):
+        node_queue = node_queue or PriorityQueue()
         self._global_upper_bound = float('inf')
-        self._global_lower_bound = -float('inf')
+        self._node_attributes = ['lower_bound', 'objective_value', 'solution',
+                                 'lp_feasible', 'mip_feasible']
+        self._node_funcs = ['bound', 'branch', '__lt__', '__eq__']
+        self._queue_funcs = ['put', 'get', 'empty']
 
         # model asserts
         assert isinstance(model, MILPInstance), 'model must be cuppy MILPInstance'
 
-        # node_class asserts
-        assert inspect.isclass(node_class), 'node_class must be a class'
-        args = {'lp', 'integerIndices', 'lower_bound'}
-        assert not args - set(inspect.signature(node_class).parameters), \
-            f'node_class constructor should contain the following arguments: {args}'
-        root = node_class(lp=model.lp, integerIndices=model.integerIndices,
-                          lower_bound=self._global_lower_bound)
-        attributes = ['lp', 'integerIndices', 'lower_bound', 'objective_value',
-                      'solution', 'lp_feasible', 'mip_feasible']
-        for attribute in attributes:
-            assert hasattr(root, attribute), f'node_class needs an {attribute} attribute'
-        for func in ['solve', 'branch']:
-            c = getattr(root, func, None)
-            assert callable(c), f'node_class needs a {func} function'
+        # Node asserts
+        assert inspect.isclass(Node), 'Node must be a class'
+        # ensures Node constructor has the args we need and no other required ones
+        root_node = Node(lp=model.lp, integerIndices=model.integerIndices,
+                    lower_bound=-float('inf'))
+        for attribute in self._node_attributes:
+            assert hasattr(root_node, attribute), f'Node needs a {attribute} attribute'
+        for func in self._node_funcs:
+            c = getattr(root_node, func, None)
+            assert callable(c), f'Node needs a {func} function'
 
         # node_queue asserts
-        for func in ['__bool__', 'push', 'min', 'pop', 'bound']:
+        for func in self._queue_funcs:
             c = getattr(node_queue, func, None)
+            # make sure no additional required args from priority queue class
             assert callable(c), f'node_queue needs a {func} function'
 
-        self._root = root
+        self._root_node = root_node
         self._node_queue = node_queue
         self.model = model
         self._best_solution = None
@@ -53,9 +53,9 @@ class BranchAndBound(BinaryTree):
 
         :return:
         """
-        self._node_queue.push(self._root)
+        self._node_queue.put(self._root_node)
 
-        while self._node_queue:
+        while not self._node_queue.empty():
             self._evaluate_next_node()
 
         self.status = 'optimal' if self._best_solution is not None else 'infeasible'
@@ -67,8 +67,10 @@ class BranchAndBound(BinaryTree):
 
         :return:
         """
-        self._current_node = self._node_queue.pop()
-        self._current_node.solve()
+        self._current_node = self._node_queue.get()
+        if self._current_node.lower_bound >= self._global_upper_bound:
+            return
+        self._current_node.bound()
 
         # do nothing if node infeasible or worse than the existing bound
         if self._current_node.lp_feasible and self._current_node.objective_value \
@@ -76,9 +78,7 @@ class BranchAndBound(BinaryTree):
             if self._current_node.mip_feasible:
                 self._best_solution = self._current_node.solution
                 self._global_upper_bound = self._current_node.objective_value
-                self._node_queue.bound(self._global_upper_bound)
             else:
                 ln, rn = self._current_node.branch()
-                self._node_queue.push(ln)
-                self._node_queue.push(rn)
-                self._global_lower_bound = self._node_queue.min().lower_bound
+                self._node_queue.put(ln)
+                self._node_queue.put(rn)
