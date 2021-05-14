@@ -3,7 +3,7 @@ from queue import PriorityQueue
 import unittest
 from unittest.mock import patch
 
-from simple_mip_solver import Node, BranchAndBound
+from simple_mip_solver import BaseNode, BranchAndBound
 from test_simple_mip_solver.example_models import no_branch, small_branch, infeasible
 
 
@@ -35,7 +35,7 @@ class TestBranchAndBound(unittest.TestCase):
                                BranchAndBound, small_branch, 'Node')
         for attribute in bb._node_attributes:
 
-            class BadNode(Node):
+            class BadNode(BaseNode):
                 def __init__(self, **kwargs):
                     super().__init__(**kwargs)
                     delattr(self, attribute)
@@ -45,7 +45,7 @@ class TestBranchAndBound(unittest.TestCase):
 
         for func in bb._node_funcs:
 
-            class BadNode(Node):
+            class BadNode(BaseNode):
                 def __init__(self, **kwargs):
                     super().__init__(**kwargs)
                     self.__dict__[func] = 5
@@ -57,7 +57,7 @@ class TestBranchAndBound(unittest.TestCase):
         for func in reversed(bb._queue_funcs):
             queue.__dict__[func] = 5
             self.assertRaisesRegex(AssertionError, f'node_queue needs a {func} function',
-                                   BranchAndBound, small_branch, Node, queue)
+                                   BranchAndBound, small_branch, BaseNode, queue)
 
     def test_solve_optimal(self):
         bb = BranchAndBound(small_branch)
@@ -103,8 +103,8 @@ class TestBranchAndBound(unittest.TestCase):
     def test_evaluate_proper_nodes_pruned(self):
         bb = BranchAndBound(no_branch)
         bb._global_upper_bound = -2
-        called_node = Node(bb.model.lp, bb.model.integerIndices, -4)
-        pruned_node = Node(bb.model.lp, bb.model.integerIndices, 0)
+        called_node = BaseNode(bb.model.lp, bb.model.integerIndices, -4)
+        pruned_node = BaseNode(bb.model.lp, bb.model.integerIndices, 0)
         with patch.object(called_node, 'bound') as cnb , \
                 patch.object(pruned_node, 'bound') as pnb:
             bb._node_queue.put(called_node)

@@ -2,7 +2,7 @@ from coinor.cuppy.milpInstance import MILPInstance
 import inspect
 from typing import Any
 
-from simple_mip_solver import Node
+from simple_mip_solver import MostFractionalBranchBestFirstSearchNode
 from queue import PriorityQueue
 
 
@@ -10,8 +10,8 @@ class BranchAndBound:
     """Class used to solve Mixed Integer Linear Programs with the Branch and
     Bound algorithm"""
 
-    def __init__(self, model: MILPInstance, Node: Any = Node,
-                 node_queue: Any = None):
+    def __init__(self, model: MILPInstance, Node: Any =
+                 MostFractionalBranchBestFirstSearchNode, node_queue: Any = None):
         node_queue = node_queue or PriorityQueue()
         self._global_upper_bound = float('inf')
         self._node_attributes = ['lower_bound', 'objective_value', 'solution',
@@ -46,7 +46,11 @@ class BranchAndBound:
         self.solution = None
         self.status = 'unsolved'
         self.objective_value = None
-        self._current_node = None
+        # TODO check these
+        self._pseudo_up = {i: {'cost': model.lp.objective, 'times': 0} for i in
+                           model.integerIndices}
+        self._pseudo_down = {i: {'cost': model.lp.objective, 'times': 0} for i
+                             in model.integerIndices}
 
     def solve(self) -> None:
         """Solves the Branch and Bound algorithm
@@ -72,13 +76,42 @@ class BranchAndBound:
             return
         self._current_node.bound()
 
-        # do nothing if node infeasible or worse than the existing bound
-        if self._current_node.lp_feasible and self._current_node.objective_value \
-                < self._global_upper_bound:
-            if self._current_node.mip_feasible:
-                self._best_solution = self._current_node.solution
-                self._global_upper_bound = self._current_node.objective_value
-            else:
-                ln, rn = self._current_node.branch()
-                self._node_queue.put(ln)
-                self._node_queue.put(rn)
+        if self._current_node.lp_feasible:
+            if self._current_node.b_idx is not None:
+                self._update_pseudo_costs()
+            # do nothing if worse than the existing bound
+            if self._current_node.objective_value < self._global_upper_bound:
+                if self._current_node.mip_feasible:
+                    self._best_solution = self._current_node.solution
+                    self._global_upper_bound = self._current_node.objective_value
+                else:
+                    ln, rn = self._current_node.branch(pseudo_down=self._pseudo_down,
+                                                       pseudo_up=self._pseudo_up)
+                    self._node_queue.put(ln)
+                    self._node_queue.put(rn)
+                
+    def _update_pseudo_costs(self) -> None:
+        """ Update the pseudo costs for the variable branched on in the current
+        node. This is done by finding the rate of change of the bound with
+        respect to the variable value and averaging that with rates of change
+        from branching on this variable previously.
+
+        :return:
+        """
+
+        n = self._current_node
+        bound_change = n.objective_value - n.lower_bound
+        if n.b_dir == 'down':
+            f = self._pseudo_down[self._current_node.b_idx]
+            variable_change = n.b_val - n.lp.upperbounds[n.b_idx]
+            self._pseudo_down[n.b_idx] = {
+                'cost': (f['cost'] * f['times'] + bound_change // variable_change) //
+                        (f['times'] + 1),
+                'times': f['times'] + 1}
+        else:
+            f = self._pseudo_up[self._current_node.b_idx]
+            variable_change = n.lp.lowerbounds[n.b_idx] - n.b_val
+            self._pseudo_up[n.b_idx] = {
+                'cost': (f['cost'] * f['times'] + bound_change // variable_change) //
+                        (f['times'] + 1),
+                'times': f['times'] + 1}
