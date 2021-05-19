@@ -1,9 +1,11 @@
 from coinor.cuppy.milpInstance import MILPInstance
 import inspect
+from queue import PriorityQueue
 from typing import Any, Dict, TypeVar
 
 from simple_mip_solver.nodes.base_node import BaseNode, T
-from queue import PriorityQueue
+from simple_mip_solver.nodes.branch.pseudo_cost import PseudoCostBranchNode
+from test_simple_mip_solver.example_models import small_branch
 
 B = TypeVar('B', bound='BranchAndBound')
 
@@ -119,3 +121,10 @@ class BranchAndBound:
             self._node_queue.put(rtn[direction])
             del rtn[direction]
         self._process_rtn(rtn)
+
+
+if __name__ == '__main__':
+    bb = BranchAndBound(small_branch, Node=PseudoCostBranchNode)
+    bb.solve()
+    print(f"objective: {bb.objective_value}")
+    print(f"solution: {bb.solution}")
