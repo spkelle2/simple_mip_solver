@@ -32,8 +32,7 @@ create. The recommended way to implement new classes is to subclass an existing
 class in this package and overwrite public methods as necessary. If you would like
 to combine different custom methods you have written into one class, import
 the objects containing your methods to `simple_mip_solver.nodes.nodes` and
-create a new subclass that inherits from them all. See that module for an
-example. Feel free to check out the modules in the subpackages of
+create a new subclass that inherits from them all. Feel free to check out the modules in the subpackages of
 `simple_mip_solver.nodes` and the classes in `simple_mip_solver.nodes.nodes` for
 examples of how to create a new method and combine multiple methods into one class,
 respectively.
