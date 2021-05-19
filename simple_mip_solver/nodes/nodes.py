@@ -1,10 +1,9 @@
-from simple_mip_solver.nodes.branch import PseudoCostBranch, MostFractionalBranch
-from simple_mip_solver.nodes.search import BestFirstSearch
+'''This file serves as a place to create nodes that multiply inherit from other
+nodes. I.e. create new classes here for nodes with both custom search and branch'''
+
+from simple_mip_solver.nodes.branch.pseudo_cost import PseudoCostBranchNode
+from simple_mip_solver.nodes.search.depth_first import DepthFirstSearchNode
 
 
-class PseudoCostBranchBestFirstSearchNode(PseudoCostBranch, BestFirstSearch):
-    pass
-
-
-class MostFractionalBranchBestFirstSearchNode(MostFractionalBranch, BestFirstSearch):
+class PseudoCostBranchDepthFirstSearchNode(PseudoCostBranchNode, DepthFirstSearchNode):
     pass

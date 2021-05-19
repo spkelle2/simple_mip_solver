@@ -1,21 +1,24 @@
 from coinor.cuppy.milpInstance import MILPInstance
 import inspect
-from typing import Any
+from typing import Any, Dict, TypeVar
 
-from simple_mip_solver import MostFractionalBranchBestFirstSearchNode
+from simple_mip_solver.nodes.base_node import BaseNode, T
 from queue import PriorityQueue
+
+B = TypeVar('B', bound='BranchAndBound')
 
 
 class BranchAndBound:
     """Class used to solve Mixed Integer Linear Programs with the Branch and
     Bound algorithm"""
 
-    def __init__(self, model: MILPInstance, Node: Any =
-                 MostFractionalBranchBestFirstSearchNode, node_queue: Any = None):
+    def __init__(self: B, model: MILPInstance, Node: Any = BaseNode,
+                 node_queue: Any = None, strong_branch_iters: int = 5):
         node_queue = node_queue or PriorityQueue()
         self._global_upper_bound = float('inf')
         self._node_attributes = ['lower_bound', 'objective_value', 'solution',
-                                 'lp_feasible', 'mip_feasible']
+                                 'lp_feasible', 'mip_feasible', 'search_method',
+                                 'branch_method']
         self._node_funcs = ['bound', 'branch', '__lt__', '__eq__']
         self._queue_funcs = ['put', 'get', 'empty']
 
@@ -26,7 +29,7 @@ class BranchAndBound:
         assert inspect.isclass(Node), 'Node must be a class'
         # ensures Node constructor has the args we need and no other required ones
         root_node = Node(lp=model.lp, integerIndices=model.integerIndices,
-                    lower_bound=-float('inf'))
+                         lower_bound=-float('inf'))
         for attribute in self._node_attributes:
             assert hasattr(root_node, attribute), f'Node needs a {attribute} attribute'
         for func in self._node_funcs:
@@ -36,9 +39,13 @@ class BranchAndBound:
         # node_queue asserts
         for func in self._queue_funcs:
             c = getattr(node_queue, func, None)
-            # make sure no additional required args from priority queue class
             assert callable(c), f'node_queue needs a {func} function'
 
+        # strong branch iters assert
+        assert isinstance(strong_branch_iters, int) and strong_branch_iters > 0, \
+            'strong branching iterations must be positive integer'
+
+        self._Node = Node
         self._root_node = root_node
         self._node_queue = node_queue
         self.model = model
@@ -46,72 +53,69 @@ class BranchAndBound:
         self.solution = None
         self.status = 'unsolved'
         self.objective_value = None
-        # TODO check these
-        self._pseudo_up = {i: {'cost': model.lp.objective, 'times': 0} for i in
-                           model.integerIndices}
-        self._pseudo_down = {i: {'cost': model.lp.objective, 'times': 0} for i
-                             in model.integerIndices}
+        self._pseudo_costs = {}
+        self._strong_branch_iters = strong_branch_iters
 
-    def solve(self) -> None:
-        """Solves the Branch and Bound algorithm
+    def solve(self: B) -> None:
+        """Solves the Branch and Bound algorithm using the bound, search, and
+        branching methods provided by the Node class and node_queue we instatiated
+        the BranchAndBound instance with.
 
         :return:
         """
         self._node_queue.put(self._root_node)
 
         while not self._node_queue.empty():
-            self._evaluate_next_node()
+            self._evaluate_node(self._node_queue.get())
 
         self.status = 'optimal' if self._best_solution is not None else 'infeasible'
         self.solution = self._best_solution
         self.objective_value = self._global_upper_bound
 
-    def _evaluate_next_node(self) -> None:
-        """Solves one node of the branch and bound algorithm
+    def _evaluate_node(self: B, node: T) -> None:
+        """Bounds and optionally branches on the given node. Updates any attributes
+        with the values keyed in the rtn's for bound and branch methods.
 
         :return:
         """
-        self._current_node = self._node_queue.get()
-        if self._current_node.lower_bound >= self._global_upper_bound:
+        if node.lower_bound >= self._global_upper_bound:
             return
-        self._current_node.bound()
+        rtn = node.bound(pseudo_costs=self._pseudo_costs,
+                         strong_branch_iters=self._strong_branch_iters)
+        self._process_rtn(rtn)
 
-        if self._current_node.lp_feasible:
-            if self._current_node.b_idx is not None:
-                self._update_pseudo_costs()
-            # do nothing if worse than the existing bound
-            if self._current_node.objective_value < self._global_upper_bound:
-                if self._current_node.mip_feasible:
-                    self._best_solution = self._current_node.solution
-                    self._global_upper_bound = self._current_node.objective_value
-                else:
-                    ln, rn = self._current_node.branch(pseudo_down=self._pseudo_down,
-                                                       pseudo_up=self._pseudo_up)
-                    self._node_queue.put(ln)
-                    self._node_queue.put(rn)
-                
-    def _update_pseudo_costs(self) -> None:
-        """ Update the pseudo costs for the variable branched on in the current
-        node. This is done by finding the rate of change of the bound with
-        respect to the variable value and averaging that with rates of change
-        from branching on this variable previously.
+        if node.lp_feasible and node.objective_value < self._global_upper_bound:
+            if node.mip_feasible:
+                self._best_solution = node.solution
+                self._global_upper_bound = node.objective_value
+            else:
+                rtn = node.branch(pseudo_costs=self._pseudo_costs)
+                self._process_branch_rtn(rtn)
 
+    def _process_rtn(self: B, rtn: Dict):
+        """ Assign the values of <rtn> to their keyed attributes
+
+        :param rtn:
+        :return:
+        """
+        assert isinstance(rtn, dict), 'rtn must be a dictionary'
+        for key, val in rtn.items():
+            setattr(self, key, val)
+
+    def _process_branch_rtn(self: B, rtn: Dict):
+        """ Pull the nodes returned from branching out of the rtn dict and into
+        the node queue before assigning the rest of the values to their keyed
+        attributes
+
+        :param rtn:
         :return:
         """
 
-        n = self._current_node
-        bound_change = n.objective_value - n.lower_bound
-        if n.b_dir == 'down':
-            f = self._pseudo_down[self._current_node.b_idx]
-            variable_change = n.b_val - n.lp.upperbounds[n.b_idx]
-            self._pseudo_down[n.b_idx] = {
-                'cost': (f['cost'] * f['times'] + bound_change // variable_change) //
-                        (f['times'] + 1),
-                'times': f['times'] + 1}
-        else:
-            f = self._pseudo_up[self._current_node.b_idx]
-            variable_change = n.lp.lowerbounds[n.b_idx] - n.b_val
-            self._pseudo_up[n.b_idx] = {
-                'cost': (f['cost'] * f['times'] + bound_change // variable_change) //
-                        (f['times'] + 1),
-                'times': f['times'] + 1}
+        assert isinstance(rtn, dict), 'rtn must be a dictionary'
+        for direction in ['up', 'down']:
+            assert direction in rtn, f'{direction} must be in the returned dict'
+            assert isinstance(rtn[direction], self._Node), \
+                f'{direction} value must be type {type(self._Node)}'
+            self._node_queue.put(rtn[direction])
+            del rtn[direction]
+        self._process_rtn(rtn)
