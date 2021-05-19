@@ -1,5 +1,7 @@
 from coinor.cuppy.milpInstance import MILPInstance
+from coinor.grumpy.BranchAndBound import GenerateRandomMIP
 from cylp.py.modeling.CyLPModel import CyLPArray
+import pandas as pd
 import numpy as np
 
 
@@ -34,3 +36,12 @@ l = CyLPArray([0, 0, 0])
 
 infeasible = MILPInstance(A=A, b=b, c=c, l=l, sense=['Max', '<='],
                           integerIndices=[0, 1], numVars=3)
+
+# ----------------------- a larger model that is random ----------------------
+cs, vs, objective, A, b = GenerateRandomMIP()
+A = np.asmatrix(pd.DataFrame.from_dict(A).to_numpy())
+objective = CyLPArray(list(objective.values()))
+b = CyLPArray(b)
+l = CyLPArray([0] * len(vs))
+random = MILPInstance(A=A, b=b, c=objective, l=l, sense=['Max', '<='],
+                      integerIndices=list(range(len(vs))), numVars=len(vs))
