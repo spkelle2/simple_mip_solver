@@ -22,7 +22,8 @@ put the repo's path in a `.pth` file so the above runs.
 
 If you would like to get a little adventurous and experiment with your own
 branch, bound, or search methods, make a new module for each branch, bound,
-or search method you write, saving them in the respective directory. For examples,
+or search method you write, saving them in the respective subpackge in 
+`simple_mip_solver.nodes`. For examples,
 check out the existing modules in the `simple_mip_solver.nodes.search` and
 `simple_mip_solver.nodes.branch` subpackages. When writing your own methods,
 please make note of the API that branch and bound in
@@ -32,4 +33,7 @@ class in this package and overwrite public methods as necessary. If you would li
 to combine different custom methods you have written into one class, import
 the objects containing your methods to `simple_mip_solver.nodes.nodes` and
 create a new subclass that inherits from them all. See that module for an
-example.
+example. Feel free to check out the modules in the subpackages of
+`simple_mip_solver.nodes` and the classes in `simple_mip_solver.nodes.nodes` for
+examples of how to create a new method and combine multiple methods into one class,
+respectively.
