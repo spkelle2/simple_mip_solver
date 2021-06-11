@@ -52,7 +52,7 @@ class PseudoCostBranchNode(BaseNode):
         :return:
         """
         # strong branch all fractional indices that have not been assigned pseudocost
-        sb_indices = [idx for idx in self._integerIndices if \
+        sb_indices = [idx for idx in self._integerIndices if
                       self._is_fractional(self.solution[idx])
                       and idx not in self.pseudo_costs]
         for idx in sb_indices:
