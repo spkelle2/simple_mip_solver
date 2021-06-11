@@ -55,7 +55,9 @@ In this class, you can overwrite the parent's methods with your new methods.
 Specifically, you will want to do the following for each method:
 
 * branch 
-    * Name your branch method `branch`. Ensure it includes a `**kwargs` argument
+    * Create a new module in `simple_mip_solver/nodes/branch` with a class that
+      inherits `simple_mip_solver.BaseNode`.
+    * In this class, name your branch method `branch`. Ensure it includes a `**kwargs` argument
       as a catchall for unneeded arguments that `BranchAndBound` objects will send.
     * Update `simple_mip_solver/branch_and_bound.py` to instantiate and send
       any additional attributes to your branch method.
@@ -66,7 +68,9 @@ Specifically, you will want to do the following for each method:
       method not included in the docstrings.
     * See `simple_mip_solver.nodes.branch.psuedo_cost.branch` for an example.
 * bound
-    * Name your bound method `bound`. Ensure it includes a `**kwargs` argument
+    * Create a new module in `simple_mip_solver/nodes/bound` with a class that
+      inherits `simple_mip_solver.BaseNode`.
+    * In this class, name your bound method `bound`. Ensure it includes a `**kwargs` argument
       as a catchall for unneeded arguments that `BranchAndBound` objects will send.
     * Update `simple_mip_solver/branch_and_bound.py` to instantiate and send 
       any additional attributes to your bound method.
@@ -82,10 +86,12 @@ Specifically, you will want to do the following for each method:
       since `simple_mip_solver.nodes.branch.psuedo_cost.branch` needs the bound
       method overwritten as well).  
 * search
-    * Define a method `__lt__` that takes another instance of your new class.
+    * Create a new module in `simple_mip_solver/nodes/search` with a class that
+      inherits `simple_mip_solver.BaseNode`.
+    * In this class, define a method `__lt__` that takes another instance of your new class.
       `__lt__` returns `True` if the instance it is in the scope of has priority
       in the Branch and Bound queue over the other instance and `False` otherwise.
-    * Define a method `__eq__` that takes another instance of your new class.
+    * Additionally, define a method `__eq__` that takes another instance of your new class.
       `__eq__` returns `True` if the instance it is in the scope of has the same
       priority in the Branch and Bound queue as the other instance and `False` otherwise.
     * Update `simple_mip_solver/nodes/search/README.md` for any details of the
