@@ -124,3 +124,6 @@ unit tests, you will want to test your class against each test instance in
 * Solve the `BranchAndBound` instance and record the optimal objective value.
 * Run the test instance on another solver and check the resulting optimal
   objective value matches.
+
+For an overview of the suite of already defined test instances, see the README
+in the `test_simple_mip_solver` package.

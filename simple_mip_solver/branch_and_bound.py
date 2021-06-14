@@ -20,6 +20,9 @@ class BranchAndBound:
     _node_funcs = ['bound', 'branch', '__lt__', '__eq__']
     _queue_funcs = ['put', 'get', 'empty']
 
+    # todo: anything not the three main just become kwargs
+    # these kwargs get passed to the branch and bound functions
+    # so **kwargs = {'strong_branch_iters': 5, 'pseudo_costs': {}}
     def __init__(self: B, model: MILPInstance, Node: Any = BaseNode,
                  node_queue: Any = None, strong_branch_iters: int = 5):
         f""" Instantiates a Branch and Bound instance
