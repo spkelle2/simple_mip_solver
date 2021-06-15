@@ -1,4 +1,4 @@
-# simple_mip_solver
+# simple_mip_solver package
 
 The solver is broken into the following two components. The `BranchAndBound` object
 in `branch_and_bound.py` runs the branch and bound algorithm for solving MILP's.

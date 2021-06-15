@@ -1,4 +1,4 @@
-# nodes
+# simple_mip_solver.nodes subpackage
 
 As mentioned in the introductory README, this subpackage is where we define
 the different node objects that serve as an API for the methods and attributes

@@ -1,4 +1,4 @@
-# branch
+# simple_mip_solver.nodes.branch subpackage
 
 As mentioned in the parent packages' READMEs, this subpackage is where we define
 the different `BaseNode` subclasses to override the branch method used by

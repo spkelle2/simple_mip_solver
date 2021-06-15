@@ -1,4 +1,4 @@
-# search
+# simple_mip_solver.nodes.search subpackage
 
 As mentioned in the parent packages' READMEs, this subpackage is where we define
 the different `BaseNode` subclasses to override the search method used by

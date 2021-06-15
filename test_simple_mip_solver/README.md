@@ -1,4 +1,4 @@
-# test_simple_mip_solver
+# test_simple_mip_solver package
 
 The test package contains unit tests for each module in the `simple_mip_solver`
 package. `test_simple_mip_solver` is laid out in a manner that mirrors

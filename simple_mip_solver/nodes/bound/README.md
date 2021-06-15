@@ -1,4 +1,4 @@
-# bound
+# simple_mip_solver.nodes.bound subpackage
 
 As mentioned in the parent packages' READMEs, this subpackage is where we define
 the different `BaseNode` subclasses to override the bound method used by

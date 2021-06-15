@@ -1,4 +1,4 @@
-# simple_mip_solver
+# simple_mip_solver repository
 
 This repository serves as a sandbox to facilitate easy testing for new branch,
 bound, and search methods for the Branch and Bound algorithm in mixed integer
