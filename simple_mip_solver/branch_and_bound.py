@@ -14,15 +14,30 @@ class BranchAndBound:
     """Class used to solve Mixed Integer Linear Programs with the Branch and
     Bound algorithm"""
 
+    _node_attributes = ['lower_bound', 'objective_value', 'solution',
+                        'lp_feasible', 'mip_feasible', 'search_method',
+                        'branch_method']
+    _node_funcs = ['bound', 'branch', '__lt__', '__eq__']
+    _queue_funcs = ['put', 'get', 'empty']
+
+    # todo: anything not the three main just become kwargs
+    # these kwargs get passed to the branch and bound functions
+    # so **kwargs = {'strong_branch_iters': 5, 'pseudo_costs': {}}
     def __init__(self: B, model: MILPInstance, Node: Any = BaseNode,
                  node_queue: Any = None, strong_branch_iters: int = 5):
+        f""" Instantiates a Branch and Bound instance
+        
+        :param model: A MILPInstance object that defines the MILP we solve
+        :param Node: A class containing attributes {self._node_attributes} and methods
+        {self._node_funcs}. Represents a single node in the branch and bound tree.
+        :param node_queue: An object containing methods {self._queue_funcs}.
+        This object is what holds and prioritizes nodes to be solved in branch and
+        bound.
+        :param strong_branch_iters: How many iterations of strong branching to run
+        if the provided node uses strong branching. 
+        """
         node_queue = node_queue or PriorityQueue()
         self._global_upper_bound = float('inf')
-        self._node_attributes = ['lower_bound', 'objective_value', 'solution',
-                                 'lp_feasible', 'mip_feasible', 'search_method',
-                                 'branch_method']
-        self._node_funcs = ['bound', 'branch', '__lt__', '__eq__']
-        self._queue_funcs = ['put', 'get', 'empty']
 
         # model asserts
         assert isinstance(model, MILPInstance), 'model must be cuppy MILPInstance'
@@ -78,10 +93,12 @@ class BranchAndBound:
         """Bounds and optionally branches on the given node. Updates any attributes
         with the values keyed in the rtn's for bound and branch methods.
 
+        :param node: the object that is bounded and potentially branched on.
         :return:
         """
         if node.lower_bound >= self._global_upper_bound:
             return
+        # todo generalize API returns into single decorator
         rtn = node.bound(pseudo_costs=self._pseudo_costs,
                          strong_branch_iters=self._strong_branch_iters)
         self._process_rtn(rtn)
@@ -112,7 +129,6 @@ class BranchAndBound:
         :param rtn:
         :return:
         """
-
         assert isinstance(rtn, dict), 'rtn must be a dictionary'
         for direction in ['up', 'down']:
             assert direction in rtn, f'{direction} must be in the returned dict'
