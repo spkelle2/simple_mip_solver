@@ -66,6 +66,7 @@ class BranchAndBound:
         self._root_node = root_node
         self._node_queue = node_queue
         self.model = model
+        self._unbounded = None
         self._best_solution = None
         self.solution = None
         self.status = 'unsolved'
@@ -82,10 +83,11 @@ class BranchAndBound:
         """
         self._node_queue.put(self._root_node)
 
-        while not self._node_queue.empty():
+        while not (self._node_queue.empty() or self._unbounded):
             self._evaluate_node(self._node_queue.get())
 
-        self.status = 'optimal' if self._best_solution is not None else 'infeasible'
+        self.status = 'unbounded' if self._unbounded else 'optimal' if \
+            self._best_solution is not None else 'infeasible'
         self.solution = self._best_solution
         self.objective_value = self._global_upper_bound
 
@@ -102,6 +104,11 @@ class BranchAndBound:
         rtn = node.bound(pseudo_costs=self._pseudo_costs,
                          strong_branch_iters=self._strong_branch_iters)
         self._process_rtn(rtn)
+
+        # this solver is not designed to handle unboundedness accurately
+        # need feasible milp solution, but may never find one
+        if node.unbounded:
+            self._unbounded = True
 
         if node.lp_feasible and node.objective_value < self._global_upper_bound:
             if node.mip_feasible:

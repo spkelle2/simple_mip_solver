@@ -78,6 +78,17 @@ l = CyLPArray([0, 0, 0])
 infeasible = MILPInstance(A=A, b=b, c=c, l=l, sense=['Max', '<='],
                           integerIndices=[0, 1], numVars=3)
 
+# ------------------------ a model that is unbounded -------------------------
+A = np.matrix([[1, -1],
+               [-1, 1]])
+b = CyLPArray([1/2],
+              [1/2])
+c = CyLPArray([1, 1])
+l = CyLPArray([0, 0])
+
+unbounded = MILPInstance(A=A, b=b, c=c, l=l, sense=['Max', '<='],
+                         integerIndices=[0, 1], numVars=2)
+
 # ----------------------- a larger model that is random ----------------------
 random = generate_random_MILPInstance(numVars=20, numCons=10)
 

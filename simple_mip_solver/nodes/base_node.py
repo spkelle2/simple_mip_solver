@@ -54,6 +54,7 @@ class BaseNode:
         self.objective_value = None
         self.solution = None
         self.lp_feasible = None
+        self.unbounded = None
         self.mip_feasible = None
         self._epsilon = .0001
         self._b_dir = b_dir
@@ -71,8 +72,15 @@ class BaseNode:
         :return: a placeholder dictionary for return that the branch and bound
         algorithm expects
         """
+        # I make the assumption here that dual infeasible implies primal unbounded.
+        # I know this isn't always true, but I am making the educated guess that
+        # cylp would have to find a dual infeasibility at the root node before a
+        # primal infeasibility for dual simplex via its first phase. In later nodes,
+        # dual infeasibility is not possible since we start with dual feasible
+        # solution
         self._lp.dual(startFinishOptions='x')
-        self.lp_feasible = self._lp.getStatusCode() == 0
+        self.lp_feasible = self._lp.getStatusCode() in [0, 2]  # optimal or dual infeasible
+        self.unbounded = self._lp.getStatusCode() == 2
         self.objective_value = self._lp.objectiveValue
         # first cyclpsimplex has variables keyed, rest are list
         sol = self._lp.primalVariableSolution
