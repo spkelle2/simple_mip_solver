@@ -6,7 +6,8 @@ from unittest.mock import patch
 
 from simple_mip_solver import BaseNode, BranchAndBound, \
     PseudoCostBranchDepthFirstSearchNode as PCBDFSNode
-from test_simple_mip_solver.example_models import no_branch, small_branch, infeasible
+from test_simple_mip_solver.example_models import no_branch, small_branch,\
+    infeasible, unbounded
 
 
 class TestBranchAndBound(unittest.TestCase):
@@ -24,6 +25,7 @@ class TestBranchAndBound(unittest.TestCase):
         self.assertTrue(inspect.isclass(bb._Node))
         self.assertTrue(bb._root_node)
         self.assertTrue(bb.model)
+        self.assertFalse(bb._unbounded)
         self.assertFalse(bb._best_solution)
         self.assertFalse(bb.solution)
         self.assertTrue(bb.status == 'unsolved')
@@ -92,6 +94,20 @@ class TestBranchAndBound(unittest.TestCase):
             self.assertFalse(bb.solution)
             self.assertTrue(bb.objective_value == float('inf'))
 
+    def test_solve_unbounded(self):
+        # check and make sure we're good with both nodes
+        for Node in [BaseNode, PCBDFSNode]:
+            bb = BranchAndBound(unbounded, Node=Node)
+            bb.solve()
+            self.assertTrue(bb.status == 'unbounded')
+
+        # check we quit even if node_queue nonempty
+        with patch.object(bb, '_evaluate_node') as en:
+            bb = BranchAndBound(unbounded)
+            bb._unbounded = True
+            bb.solve()
+            self.assertFalse(en.called)
+
     def test_evaluate_node_infeasible(self):
         bb = BranchAndBound(infeasible)
         bb._evaluate_node(bb._root_node)
@@ -152,6 +168,13 @@ class TestBranchAndBound(unittest.TestCase):
             self.assertTrue(pbr.call_count == 0)
             self.assertTrue(bd.call_count == 1)
             self.assertTrue(bh.call_count == 0)
+
+    def test_evaluate_node_unbounded(self):
+        bb = BranchAndBound(unbounded)
+        bb._evaluate_node(bb._root_node)
+
+        # check attributes
+        self.assertTrue(bb._unbounded)
 
     def test_evaluate_node_properly_prunes(self):
         bb = BranchAndBound(no_branch)

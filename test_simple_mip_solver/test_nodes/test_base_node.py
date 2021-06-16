@@ -1,13 +1,24 @@
+from coinor.cuppy.milpInstance import MILPInstance
+from cylp.cy import CyClpSimplex
+# so pulp and pyomo don't believe reading in flat files is a worthwhile feature
+# so we don't have much of an option here but to use some sort of commercial solver
+try:  # if you don't have gurobipy installed, all tests except those using gurobi will run
+    import gurobipy as gu
+except ImportError:
+    gu = None
 from queue import PriorityQueue
 import unittest
 from unittest.mock import patch, PropertyMock
 
 from simple_mip_solver import BaseNode
 from test_simple_mip_solver.example_models import no_branch, small_branch, \
-    infeasible, random
+    infeasible, random, unbounded
+from test_simple_mip_solver.helpers import TestModels
 
 
-class TestNode(unittest.TestCase):        
+class TestNode(TestModels):
+
+    Node = BaseNode  # define this for the TestModels attribute
 
     def test_init(self):
         node = BaseNode(small_branch.lp, small_branch.integerIndices)
@@ -16,12 +27,13 @@ class TestNode(unittest.TestCase):
         self.assertFalse(node.objective_value, 'should have obj but empty')
         self.assertFalse(node.solution, 'should have solution but empty')
         self.assertFalse(node.lp_feasible, 'should have lp_feasible but empty')
+        self.assertFalse(node.lp_feasible, 'should have unbounded but empty')
         self.assertFalse(node.mip_feasible, 'should have mip_feasible but empty')
         self.assertTrue(node._epsilon > 0, 'should have epsilon > 0')
         self.assertFalse(node._b_dir, 'should have branch direction but empty')
         self.assertFalse(node._b_idx, 'should have branch index but empty')
         self.assertFalse(node._b_val, 'should have node value but empty')
-        self.assertFalse(node.depth, 'should have depth but empty 0')
+        self.assertFalse(node.depth, 'should have depth but 0')
         self.assertTrue(node.branch_method == 'most fractional')
         self.assertTrue(node.search_method == 'best first')
 
@@ -59,6 +71,7 @@ class TestNode(unittest.TestCase):
         # integer solutions should come back as both lp and mip feasible
         self.assertTrue(node.lp_feasible)
         self.assertTrue(node.mip_feasible)
+        self.assertFalse(node.unbounded)
 
     def test_base_bound_fractional(self):
         node = BaseNode(small_branch.lp, small_branch.integerIndices)
@@ -68,6 +81,7 @@ class TestNode(unittest.TestCase):
         # fractional solutions should come back as lp but not mip feasible
         self.assertTrue(node.lp_feasible)
         self.assertFalse(node.mip_feasible)
+        self.assertFalse(node.unbounded)
 
     def test_base_bound_infeasible(self):
         node = BaseNode(infeasible.lp, infeasible.integerIndices)
@@ -75,6 +89,14 @@ class TestNode(unittest.TestCase):
         # infeasible problems should come back as neither lp nor mip feasible
         self.assertFalse(node.lp_feasible)
         self.assertFalse(node.mip_feasible)
+        self.assertFalse(node.unbounded)
+
+    def test_base_bound_unbounded(self):
+        node = BaseNode(unbounded.lp, unbounded.integerIndices)
+        node._base_bound()
+
+        self.assertTrue(node.lp_feasible)
+        self.assertTrue(node.unbounded)
 
     def test_bound(self):
         # check function calls
@@ -221,6 +243,9 @@ class TestNode(unittest.TestCase):
         self.assertTrue(node3 == node2)
         self.assertFalse(node1 == node2)
         self.assertRaises(TypeError, node1.__eq__, 5)
+
+    def test_models(self):
+        self.base_test_models()
 
 
 if __name__ == '__main__':

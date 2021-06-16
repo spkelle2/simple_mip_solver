@@ -5,8 +5,12 @@ from unittest.mock import patch
 from simple_mip_solver.nodes.branch.pseudo_cost import PseudoCostBranchNode
 from test_simple_mip_solver.example_models import small_branch
 
+from test_simple_mip_solver.helpers import TestModels
 
-class TestNode(unittest.TestCase):
+
+class TestNode(TestModels):
+
+    Node = PseudoCostBranchNode
 
     def test_init(self):
         node = PseudoCostBranchNode(small_branch.lp, small_branch.integerIndices)
@@ -213,6 +217,9 @@ class TestNode(unittest.TestCase):
         err = node._check_pseudo_costs(pc)[0]
         self.assertTrue(err == 'index 15 not integer index',
                         "pc[15] should error")
+
+    def test_models(self):
+        self.base_test_models()
 
 
 if __name__ == '__main__':
