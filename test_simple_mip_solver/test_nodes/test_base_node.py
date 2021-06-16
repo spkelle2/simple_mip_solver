@@ -1,3 +1,11 @@
+from coinor.cuppy.milpInstance import MILPInstance
+from cylp.cy import CyClpSimplex
+# so pulp and pyomo don't believe reading in flat files is a worthwhile feature
+# so we don't have much of an option here but to use some sort of commercial solver
+try:  # if you don't have gurobipy installed, all tests except those using gurobi will run
+    import gurobipy as gu
+except ImportError:
+    gu = None
 from queue import PriorityQueue
 import unittest
 from unittest.mock import patch, PropertyMock
@@ -5,9 +13,12 @@ from unittest.mock import patch, PropertyMock
 from simple_mip_solver import BaseNode
 from test_simple_mip_solver.example_models import no_branch, small_branch, \
     infeasible, random
+from test_simple_mip_solver.helpers import TestModels
 
 
-class TestNode(unittest.TestCase):        
+class TestNode(TestModels):
+
+    Node = BaseNode  # define this for the TestModels attribute
 
     def test_init(self):
         node = BaseNode(small_branch.lp, small_branch.integerIndices)
@@ -221,6 +232,9 @@ class TestNode(unittest.TestCase):
         self.assertTrue(node3 == node2)
         self.assertFalse(node1 == node2)
         self.assertRaises(TypeError, node1.__eq__, 5)
+
+    def test_models(self):
+        self.base_test_models()
 
 
 if __name__ == '__main__':

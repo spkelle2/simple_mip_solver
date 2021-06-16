@@ -1,8 +1,49 @@
 from coinor.cuppy.milpInstance import MILPInstance
 from coinor.grumpy.BranchAndBound import GenerateRandomMIP
 from cylp.py.modeling.CyLPModel import CyLPArray
+from itertools import product
 import pandas as pd
 import numpy as np
+
+
+# helpers to generate random models
+def generate_random_MILPInstance(numVars=40, numCons=20, density=0.2,
+                                 maxObjCoeff=10, maxConsCoeff=10,
+                                 tightness=2, rand_seed=2):
+    cs, vs, objective, A, b = GenerateRandomMIP(
+        numVars=numVars, numCons=numCons, density=density, maxObjCoeff=maxObjCoeff,
+        maxConsCoeff=maxConsCoeff, tightness=tightness, rand_seed=rand_seed
+    )
+    A = np.asmatrix(pd.DataFrame.from_dict(A).to_numpy())
+    objective = CyLPArray(list(objective.values()))
+    b = CyLPArray(b)
+    l = CyLPArray([0] * len(vs))
+    u = CyLPArray([maxObjCoeff] * len(vs))
+    return MILPInstance(A=A, b=b, c=objective, l=l, u=u, sense=['Max', '<='],
+                        integerIndices=list(range(len(vs))), numVars=len(vs))
+
+
+def generate_random_variety():
+    constraints = {10: 'low', 20: 'high'}
+    variables = {10: 'low', 20: 'high'}
+    densities = {.2: 'low', .8: 'high'}
+    max_obj_coeffs = {10: 'low', 1000: 'high'}
+    max_cons_coeffs = {10: 'low', 1000: 'high'}
+    tightnesses = {2: 'low', 8: 'high'}
+
+    for constraint, variable, density, max_obj_coeff, max_cons_coeff, \
+        tightness in product(constraints, variables, densities, max_obj_coeffs,
+                             max_cons_coeffs, tightnesses):
+        m = generate_random_MILPInstance(constraint, variable, density,
+                                         max_obj_coeff, max_cons_coeff, tightness)
+        for i in m.integerIndices:
+            m.lp.setInteger(i)
+        m.lp.writeMps(f'constraints_{constraints[constraint]}'
+                      f'_variables_{variables[variable]}'
+                      f'_density_{densities[density]}'
+                      f'_max_obj_coeff_{max_obj_coeffs[max_obj_coeff]}'
+                      f'_max_cons_coeff_{max_cons_coeffs[max_cons_coeff]}'
+                      f'_tightness_{tightnesses[tightness]}.mps')
 
 
 # ----------------- a model with MIP feasible LP relaxation -----------------
@@ -38,10 +79,8 @@ infeasible = MILPInstance(A=A, b=b, c=c, l=l, sense=['Max', '<='],
                           integerIndices=[0, 1], numVars=3)
 
 # ----------------------- a larger model that is random ----------------------
-cs, vs, objective, A, b = GenerateRandomMIP()
-A = np.asmatrix(pd.DataFrame.from_dict(A).to_numpy())
-objective = CyLPArray(list(objective.values()))
-b = CyLPArray(b)
-l = CyLPArray([0] * len(vs))
-random = MILPInstance(A=A, b=b, c=objective, l=l, sense=['Max', '<='],
-                      integerIndices=list(range(len(vs))), numVars=len(vs))
+random = generate_random_MILPInstance(numVars=20, numCons=10)
+
+
+if __name__ == '__main__':
+    generate_random_variety()

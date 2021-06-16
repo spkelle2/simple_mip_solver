@@ -47,6 +47,7 @@ class BaseNode:
             assert (b_dir == 'down' and good_down) or \
                    (b_dir == 'up' and good_up), 'branch val should be within 1 of both bounds'
         assert isinstance(depth, int) and depth >= 0, 'depth is a positive integer'
+        lp.logLevel = 0
         self._lp = lp
         self._integerIndices = integerIndices
         self.lower_bound = lower_bound
