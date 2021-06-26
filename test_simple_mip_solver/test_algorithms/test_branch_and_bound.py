@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 from simple_mip_solver import BaseNode, BranchAndBound, \
     PseudoCostBranchDepthFirstSearchNode as PCBDFSNode
+from simple_mip_solver.algorithms.utils import Utils
 from test_simple_mip_solver.example_models import no_branch, small_branch,\
     infeasible, unbounded
 
@@ -20,50 +21,18 @@ class TestBranchAndBound(unittest.TestCase):
 
     def test_init(self):
         bb = BranchAndBound(small_branch)
+        self.assertTrue(isinstance(bb, Utils))
         self.assertTrue(bb._global_upper_bound == float('inf'))
         self.assertTrue(bb._node_queue.empty())
-        self.assertTrue(inspect.isclass(bb._Node))
-        self.assertTrue(bb._root_node)
-        self.assertTrue(bb.model)
         self.assertFalse(bb._unbounded)
         self.assertFalse(bb._best_solution)
         self.assertFalse(bb.solution)
         self.assertTrue(bb.status == 'unsolved')
         self.assertFalse(bb.objective_value)
-        self.assertFalse(bb._pseudo_costs, 'should exist but be empty')
-        self.assertTrue(bb._strong_branch_iters == 5)
 
     def test_init_fails_asserts(self):
-        lp = CyClpSimplex()
         bb = BranchAndBound(small_branch)
         queue = PriorityQueue()
-
-        # model asserts
-        self.assertRaisesRegex(AssertionError, 'model must be cuppy MILPInstance',
-                               BranchAndBound, lp)
-
-        # Node asserts
-        self.assertRaisesRegex(AssertionError, 'Node must be a class',
-                               BranchAndBound, small_branch, 'Node')
-        for attribute in bb._node_attributes:
-
-            class BadNode(BaseNode):
-                def __init__(self, **kwargs):
-                    super().__init__(**kwargs)
-                    delattr(self, attribute)
-
-            self.assertRaisesRegex(AssertionError, f'Node needs a {attribute}',
-                                   BranchAndBound, small_branch, BadNode)
-
-        for func in bb._node_funcs:
-
-            class BadNode(BaseNode):
-                def __init__(self, **kwargs):
-                    super().__init__(**kwargs)
-                    self.__dict__[func] = 5
-
-            self.assertRaisesRegex(AssertionError, f'Node needs a {func}',
-                                   BranchAndBound, small_branch, BadNode)
 
         # node_queue asserts
         for func in reversed(bb._queue_funcs):
@@ -71,15 +40,10 @@ class TestBranchAndBound(unittest.TestCase):
             self.assertRaisesRegex(AssertionError, f'node_queue needs a {func} function',
                                    BranchAndBound, small_branch, BaseNode, queue)
 
-        # strong branch iters asserts
-        self.assertRaisesRegex(AssertionError,
-                               'strong branching iterations must be positive integer',
-                               BranchAndBound, small_branch, strong_branch_iters=-1)
-
     def test_solve_optimal(self):
         # check and make sure we're good with both nodes
         for Node in [BaseNode, PCBDFSNode]:
-            bb = BranchAndBound(small_branch, Node=Node)
+            bb = BranchAndBound(small_branch, Node=Node, pseudo_costs={})
             bb.solve()
             self.assertTrue(bb.status == 'optimal')
             self.assertTrue(all(s.is_integer for s in bb.solution))
@@ -88,7 +52,7 @@ class TestBranchAndBound(unittest.TestCase):
     def test_solve_infeasible(self):
         # check and make sure we're good with both nodes
         for Node in [BaseNode, PCBDFSNode]:
-            bb = BranchAndBound(infeasible, Node=Node)
+            bb = BranchAndBound(infeasible, Node=Node, pseudo_costs={})
             bb.solve()
             self.assertTrue(bb.status == 'infeasible')
             self.assertFalse(bb.solution)
@@ -97,7 +61,7 @@ class TestBranchAndBound(unittest.TestCase):
     def test_solve_unbounded(self):
         # check and make sure we're good with both nodes
         for Node in [BaseNode, PCBDFSNode]:
-            bb = BranchAndBound(unbounded, Node=Node)
+            bb = BranchAndBound(unbounded, Node=Node, pseudo_costs={})
             bb.solve()
             self.assertTrue(bb.status == 'unbounded')
 
@@ -121,33 +85,39 @@ class TestBranchAndBound(unittest.TestCase):
         with patch.object(bb, '_process_rtn') as pr, \
                 patch.object(bb, '_process_branch_rtn') as pbr, \
                 patch.object(bb._root_node, 'bound') as bd, \
-                patch.object(bb._root_node, 'branch') as bh:
+                patch.object(bb._root_node, 'branch') as bh, \
+                patch.object(bb, '_update_lower_bound') as ulb:
             bb._evaluate_node(bb._root_node)
             self.assertTrue(pr.call_count == 1)
             self.assertTrue(pbr.call_count == 0)
             self.assertTrue(bd.call_count == 1)
             self.assertTrue(bh.call_count == 0)
+            self.assertTrue(ulb.called)
 
     def test_evaluate_node_fractional(self):
-        bb = BranchAndBound(small_branch, Node=PCBDFSNode)
+        bb = BranchAndBound(small_branch, Node=PCBDFSNode, pseudo_costs={},
+                            strong_branch_iters=5)
         bb._evaluate_node(bb._root_node)
 
         # check attributes
         self.assertFalse(bb._best_solution, 'best solution should not change')
         self.assertTrue(bb._global_upper_bound == float('inf'), 'shouldnt change')
         self.assertTrue(bb._node_queue.qsize() == 2, 'should branch and add two nodes')
-        self.assertTrue(bb._pseudo_costs, 'something should be set')
+        self.assertTrue(bb._kwargs['pseudo_costs'], 'something should be set')
+        self.assertTrue(bb._kwargs['strong_branch_iters'], 'something should be set')
 
         # check function calls - recycle object since it has attrs already set
         with patch.object(bb, '_process_rtn') as pr, \
                 patch.object(bb, '_process_branch_rtn') as pbr, \
                 patch.object(bb._root_node, 'bound') as bd, \
-                patch.object(bb._root_node, 'branch') as bh:
+                patch.object(bb._root_node, 'branch') as bh, \
+                patch.object(bb, '_update_lower_bound') as ulb:
             bb._evaluate_node(bb._root_node)
             self.assertTrue(pr.call_count == 1)  # direct calls
             self.assertTrue(pbr.call_count == 1)
             self.assertTrue(bd.call_count == 1)
             self.assertTrue(bh.call_count == 1)
+            self.assertTrue(ulb.called)
 
     def test_evaluate_node_integer(self):
         bb = BranchAndBound(no_branch)
@@ -162,12 +132,14 @@ class TestBranchAndBound(unittest.TestCase):
         with patch.object(bb, '_process_rtn') as pr, \
                 patch.object(bb, '_process_branch_rtn') as pbr, \
                 patch.object(bb._root_node, 'bound') as bd, \
-                patch.object(bb._root_node, 'branch') as bh:
+                patch.object(bb._root_node, 'branch') as bh, \
+                patch.object(bb, '_update_lower_bound') as ulb:
             bb._evaluate_node(bb._root_node)
             self.assertTrue(pr.call_count == 1)
             self.assertTrue(pbr.call_count == 0)
             self.assertTrue(bd.call_count == 1)
             self.assertTrue(bh.call_count == 0)
+            self.assertTrue(ulb.called)
 
     def test_evaluate_node_unbounded(self):
         bb = BranchAndBound(unbounded)
@@ -182,7 +154,8 @@ class TestBranchAndBound(unittest.TestCase):
         called_node = BaseNode(bb.model.lp, bb.model.integerIndices, -4)
         pruned_node = BaseNode(bb.model.lp, bb.model.integerIndices, 0)
         with patch.object(called_node, 'bound') as cnb, \
-                patch.object(pruned_node, 'bound') as pnb:
+                patch.object(pruned_node, 'bound') as pnb, \
+                patch.object(bb, '_update_lower_bound') as ulb:
             cnb.return_value = {}
             pnb.return_value = {}
             bb._node_queue.put(called_node)
@@ -193,15 +166,31 @@ class TestBranchAndBound(unittest.TestCase):
             self.assertFalse(pnb.call_count, 'second node should get pruned')
             self.assertTrue(bb._node_queue.empty())
 
-    def test_process_rtn_fails_asserts(self):
+    def test_update_lower_bound_fails_asserts(self):
         bb = BranchAndBound(small_branch)
-        self.assertRaisesRegex(AssertionError, 'rtn must be a dictionary',
-                               bb._process_rtn, 'fish')
+        self.assertRaises(AssertionError, bb._update_lower_bound, bb._root_node)
 
-    def test_process_rtn(self):
+    def test_update_lower_bound(self):
         bb = BranchAndBound(small_branch)
-        bb._process_rtn({'_pseudo_costs': 5})
-        self.assertTrue(bb._pseudo_costs == 5)
+        bb._root_node.bound()
+        bb._update_lower_bound(bb._root_node)
+        # first one should update bc nothing else in queue
+        self.assertTrue(bb._global_lower_bound == bb._root_node.objective_value)
+        bb._process_branch_rtn(bb._root_node.branch())
+        glb = bb._global_lower_bound
+        cur_node = bb._node_queue.get()
+        cur_node.bound()
+        bb._update_lower_bound(cur_node)
+        # shouldnt change with same lower bound sibling in queue
+        self.assertTrue(bb._global_lower_bound < cur_node.objective_value)
+        self.assertTrue(bb._global_lower_bound == glb)
+        # again doesnt change
+        glb = bb._global_lower_bound
+        cur_node = bb._node_queue.get()
+        cur_node.bound()
+        bb._update_lower_bound(cur_node)
+        self.assertTrue(bb._global_lower_bound == cur_node.objective_value)
+        self.assertTrue(bb._global_lower_bound == glb)
 
     def test_process_branch_rtn_fails_asserts(self):
         bb = BranchAndBound(small_branch)

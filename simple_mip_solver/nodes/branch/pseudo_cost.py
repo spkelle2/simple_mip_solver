@@ -52,7 +52,7 @@ class PseudoCostBranchNode(BaseNode):
         :return:
         """
         # strong branch all fractional indices that have not been assigned pseudocost
-        sb_indices = [idx for idx in self._integerIndices if
+        sb_indices = [idx for idx in self._integer_indices if
                       self._is_fractional(self.solution[idx])
                       and idx not in self.pseudo_costs]
         for idx in sb_indices:
@@ -123,7 +123,7 @@ class PseudoCostBranchNode(BaseNode):
                    (ceil(self.solution[i]) - self.solution[i]),
                    pseudo_costs[i]['down']['cost'] *
                    (self.solution[i] - floor(self.solution[i])))
-            for i in self._integerIndices if self._is_fractional(self.solution[i])
+            for i in self._integer_indices if self._is_fractional(self.solution[i])
         }
         return sorted(scores, key=scores.get, reverse=True)[0]
 
@@ -136,7 +136,7 @@ class PseudoCostBranchNode(BaseNode):
         """
         problems = []
         for idx in pseudo_costs:
-            if idx not in self._integerIndices:
+            if idx not in self._integer_indices:
                 problems.append(f'index {idx} not integer index')
                 continue
             for direction in ['up', 'down']:

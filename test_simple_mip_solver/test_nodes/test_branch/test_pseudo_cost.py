@@ -12,6 +12,9 @@ class TestNode(TestModels):
 
     Node = PseudoCostBranchNode
 
+    def setUp(self) -> None:
+        self.kwargs = {'pseudo_costs': {}}
+
     def test_init(self):
         node = PseudoCostBranchNode(small_branch.lp, small_branch.integerIndices)
         self.assertTrue(node.branch_method == 'pseudo cost')

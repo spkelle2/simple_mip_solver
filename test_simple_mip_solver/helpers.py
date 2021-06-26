@@ -11,6 +11,7 @@ import os
 import unittest
 
 from simple_mip_solver import BranchAndBound
+from simple_mip_solver.algorithms.utils import Utils
 from test_simple_mip_solver.example_models import generate_random_variety
 
 
@@ -24,7 +25,7 @@ class TestModels(unittest.TestCase):
 
     Node = None
 
-    def base_test_models(self):
+    def base_test_models(self, standardize_model=False):
         self.assertTrue(gu, 'gurobipy needed for this test')
         fldr = os.path.join(
             os.path.dirname(os.path.abspath(inspect.getfile(generate_random_variety))),
@@ -34,7 +35,8 @@ class TestModels(unittest.TestCase):
             print(f'running test {i + 1}')
             pth = os.path.join(fldr, file)
             model = MILPInstance(file_name=pth)
-            bb = BranchAndBound(model, self.Node)
+            bb = BranchAndBound(model, self.Node, pseudo_costs={},
+                                standardize_model=standardize_model)
             bb.solve()
             gu_mdl = gu.read(pth)
             gu_mdl.optimize()

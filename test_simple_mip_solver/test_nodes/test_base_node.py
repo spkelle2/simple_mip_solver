@@ -1,16 +1,18 @@
 from coinor.cuppy.milpInstance import MILPInstance
-from cylp.cy import CyClpSimplex
+from cylp.py.modeling.CyLPModel import CyLPArray
 # so pulp and pyomo don't believe reading in flat files is a worthwhile feature
 # so we don't have much of an option here but to use some sort of commercial solver
 try:  # if you don't have gurobipy installed, all tests except those using gurobi will run
     import gurobipy as gu
 except ImportError:
     gu = None
+import numpy as np
 from queue import PriorityQueue
 import unittest
 from unittest.mock import patch, PropertyMock
 
 from simple_mip_solver import BaseNode
+from simple_mip_solver.algorithms.utils import Utils
 from test_simple_mip_solver.example_models import no_branch, small_branch, \
     infeasible, random, unbounded
 from test_simple_mip_solver.helpers import TestModels
@@ -90,6 +92,8 @@ class TestNode(TestModels):
         self.assertFalse(node.lp_feasible)
         self.assertFalse(node.mip_feasible)
         self.assertFalse(node.unbounded)
+        self.assertTrue(node.solution is None)
+        self.assertTrue(node.objective_value == float('inf'))
 
     def test_base_bound_unbounded(self):
         node = BaseNode(unbounded.lp, unbounded.integerIndices)
@@ -139,7 +143,7 @@ class TestNode(TestModels):
             self.assertTrue(all(n._lp.constraintsLower == node._lp.constraintsLower))
             self.assertTrue(all(n._lp.constraintsUpper == node._lp.constraintsUpper))
             if name == 'down':
-                self.assertTrue(all(n._lp.variablesUpper >= [1e10, 1e10, 1]))
+                self.assertTrue(all(n._lp.variablesUpper == [10, 10, 1]))
                 self.assertTrue(n._lp.variablesUpper[idx] == 1)
                 self.assertTrue(all(n._lp.variablesLower == node._lp.variablesLower))
             else:
@@ -193,6 +197,15 @@ class TestNode(TestModels):
         self.assertFalse(node._is_fractional(5))
         self.assertFalse(node._is_fractional(5.999999))
         self.assertFalse(node._is_fractional(5.000001))
+
+    def test_get_fraction_fails_asserts(self):
+        node = BaseNode(small_branch.lp, small_branch.integerIndices)
+        self.assertRaisesRegex(AssertionError, 'value should be a number',
+                               node._get_fraction, '5.5')
+
+    def test_get_fraction(self):
+        node = BaseNode(small_branch.lp, small_branch.integerIndices)
+        self.assertTrue(.5 == node._get_fraction(5.5))
         
     def test_most_fractional_index(self):
         node = BaseNode(no_branch.lp, no_branch.integerIndices)
@@ -243,6 +256,34 @@ class TestNode(TestModels):
         self.assertTrue(node3 == node2)
         self.assertFalse(node1 == node2)
         self.assertRaises(TypeError, node1.__eq__, 5)
+
+    def test_sense_fails_asserts(self):
+        node = BaseNode(small_branch.lp, small_branch.integerIndices)
+        node._lp.addConstraint(-CyLPArray([1, 0, 0]) * node._lp.getVarByName('x') >= 1)
+        with self.assertRaises(AssertionError):
+            node._sense
+
+    def test_sense(self):
+        node = BaseNode(small_branch.lp, small_branch.integerIndices)
+        self.assertTrue(node._sense == '<=')
+        milp = MILPInstance(A=small_branch.A, b=small_branch.b, c=small_branch.c,
+                            sense=['Min', '>='], numVars=3,
+                            integerIndices=small_branch.integerIndices)
+        node = BaseNode(milp.lp, milp.integerIndices)
+        self.assertTrue(node._sense == '>=')
+
+    def test_variables_nonnegative_fails_asserts(self):
+        node = BaseNode(small_branch.lp, small_branch.integerIndices)
+        with self.assertRaises(AssertionError):
+            node._variables_nonnegative
+
+    def test_variables_nonnegative(self):
+        m = Utils._convert_constraints_to_greq(small_branch)
+        node = BaseNode(m.lp, m.integerIndices)
+        self.assertFalse(node._variables_nonnegative)
+        m = Utils._standardize_model(small_branch)
+        node = BaseNode(m.lp, m.integerIndices)
+        self.assertTrue(node._variables_nonnegative)
 
     def test_models(self):
         self.base_test_models()

@@ -64,8 +64,9 @@ A = np.matrix([[1, 0, 1],
 b = CyLPArray([1.5, 1.25])
 c = CyLPArray([1, 1, 1])
 l = CyLPArray([0, 0, 0])
+u = CyLPArray([10, 10, 10])
 
-small_branch = MILPInstance(A=A, b=b, c=c, l=l, sense=['Max', '<='],
+small_branch = MILPInstance(A=A, b=b, c=c, l=l, u=u, sense=['Max', '<='],
                             integerIndices=[0, 1, 2], numVars=3)
 
 
@@ -92,6 +93,31 @@ unbounded = MILPInstance(A=A, b=b, c=c, l=l, sense=['Max', '<='],
 # ----------------------- a larger model that is random ----------------------
 random = generate_random_MILPInstance(numVars=20, numCons=10)
 
+# ---------------- a model for testing cutting plane methods -----------------
+A = np.matrix([[-8, 30],
+               [-14, 8],
+               [10, 10]])
+b = CyLPArray([[115],
+               [1],
+               [127]])
+c = CyLPArray([1, 1])
+l = CyLPArray([0, 0])
+
+cut1 = MILPInstance(A=A, b=b, c=c, l=l, sense=['Max', '<='],
+                    integerIndices=[0, 1], numVars=2)
+
+# ---------------- a model for testing cutting plane methods -----------------
+A = np.matrix([[4, 1],
+               [1, 4],
+               [1, -1]])
+b = CyLPArray([[28],
+               [27],
+               [1]])
+c = CyLPArray([2, 5])
+l = CyLPArray([0, 0])
+
+cut2 = MILPInstance(A=A, b=b, c=c, l=l, sense=['Max', '<='],
+                    integerIndices=[0, 1], numVars=2)
 
 if __name__ == '__main__':
     generate_random_variety()
