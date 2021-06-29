@@ -43,8 +43,8 @@ class BranchAndBound(Utils):
         node_queue = node_queue or PriorityQueue()
 
         # call super
-        super().__init__(model=model, Node=Node, standardize_model=standardize_model,
-                         node_attributes=self._node_attributes, node_funcs=self._node_funcs)
+        super().__init__(model=model, Node=Node, node_attributes=self._node_attributes,
+                         node_funcs=self._node_funcs)
 
         # node_queue asserts
         for func in self._queue_funcs:

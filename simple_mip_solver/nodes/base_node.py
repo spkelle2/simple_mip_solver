@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from cylp.cy.CyClpSimplex import CyClpSimplex, getModelExample
+from cylp.cy.CyClpSimplex import CyClpSimplex
+from cylp.py.modeling.CyLPModel import CyLPArray
 from math import floor, ceil
 import numpy as np
 import re
@@ -112,39 +113,32 @@ class BaseNode:
         b_val = self.solution[idx]
         assert self._is_fractional(b_val), "index branched on must be fractional"
 
-        # get end basis to warm start the kiddos
+        # get end basis to warm start the children
         # appears to be tuple  (variable statuses, slack statuses)
         basis = self._lp.getBasisStatus()
 
-        # todo: this could be an issue for cut generation forms
-        # todo: find where the cyLPmodel is. use it to instantiate cyclpsimplex
-        # when branching down set floor as upper bound for given index
-        u = self._lp.variablesUpper.copy()
-        u[idx] = floor(b_val)
-        down_lp = CyClpSimplex()
-        down_lp.loadProblem(
-            self._lp.matrix, self._lp.variablesLower,
-            u, self._lp.objective, self._lp.constraintsLower,
-            self._lp.constraintsUpper
-        )
-        down_lp.setBasisStatus(*basis)  # warm start
-
-        # when branching up set ceiling as lower bound for given index
-        l = self._lp.variablesLower.copy()
-        l[idx] = ceil(b_val)
-        up_lp = CyClpSimplex()
-        up_lp.loadProblem(
-            self._lp.matrix, l, self._lp.variablesUpper,
-            self._lp.objective, self._lp.constraintsLower,
-            self._lp.constraintsUpper
-        )
-        up_lp.setBasisStatus(*basis)  # warm start
+        # create new lp's for each direction
+        children = {'up': CyClpSimplex(), 'down': CyClpSimplex()}
+        A = np.matrix(self._lp.coefMatrix.toarray())
+        for direction, lp in children.items():
+            x = lp.addVariable('x', self._lp.nCols)
+            l = CyLPArray(self._lp.variablesLower.copy())
+            u = CyLPArray(self._lp.variablesUpper.copy())
+            if direction == 'down':
+                u[idx] = floor(b_val)
+            else:
+                l[idx] = ceil(b_val)
+            lp +=  l <= x <= u
+            lp += CyLPArray(self._lp.constraintsLower.copy()) <= A * x \
+                  <= CyLPArray(self._lp.constraintsUpper.copy())
+            lp.objective = self._lp.objective
+            lp.setBasisStatus(*basis)  # warm start
 
         # return instances of the subclass that calls this function
-        return {'down': type(self)(down_lp, self._integer_indices,
+        return {'down': type(self)(children['down'], self._integer_indices,
                                    self.objective_value, idx, 'down', b_val,
                                    self.depth + 1),
-                'up': type(self)(up_lp, self._integer_indices,
+                'up': type(self)(children['up'], self._integer_indices,
                                  self.objective_value, idx, 'up', b_val,
                                  self.depth + 1)}
 
@@ -245,19 +239,7 @@ class BaseNode:
     @property
     def _variables_nonnegative(self):
         """ Determines if all variables in the lp model are bound to be nonnegative
-        by having a constraint for each variable with index i
 
         :return:
         """
-        assert self._sense == '>=', 'only implemented for >= cases'
-        inf = self._lp.getCoinInfinity()
-        lb = {}
-        x = self._lp.getVarByName('x')
-        for c in self._lp.constraints:
-            coefs = c.varCoefs[x]
-            for i in range(c.nRows):
-                # check if we have standard basis vector
-                if coefs[i].sum() == 1 and coefs[i].max() == 1 and coefs[i].min() == 0:
-                    idx = np.nonzero(coefs[i])[0][0]
-                    lb[idx] = max(lb.get(idx, -inf), c.lower[i])
-        return all(lb.get(i, -inf) >= 0 for i in self._var_indices)
+        return (self._lp.variablesLower >= 0).all()

@@ -14,7 +14,7 @@ from unittest.mock import patch, PropertyMock
 from simple_mip_solver import BaseNode
 from simple_mip_solver.algorithms.utils import Utils
 from test_simple_mip_solver.example_models import no_branch, small_branch, \
-    infeasible, random, unbounded
+    infeasible, random, unbounded, cut2
 from test_simple_mip_solver.helpers import TestModels
 
 
@@ -272,18 +272,14 @@ class TestNode(TestModels):
         node = BaseNode(milp.lp, milp.integerIndices)
         self.assertTrue(node._sense == '>=')
 
-    def test_variables_nonnegative_fails_asserts(self):
-        node = BaseNode(small_branch.lp, small_branch.integerIndices)
-        with self.assertRaises(AssertionError):
-            node._variables_nonnegative
-
     def test_variables_nonnegative(self):
-        m = Utils._convert_constraints_to_greq(small_branch)
-        node = BaseNode(m.lp, m.integerIndices)
-        self.assertFalse(node._variables_nonnegative)
-        m = Utils._standardize_model(small_branch)
-        node = BaseNode(m.lp, m.integerIndices)
+        node = BaseNode(small_branch.lp, small_branch.integerIndices)
         self.assertTrue(node._variables_nonnegative)
+        node = BaseNode(cut2.lp, cut2.integerIndices)
+        l = node._lp.variablesLower.copy()
+        l[0] = -10
+        node._lp.variablesLower = l
+        self.assertFalse(node._variables_nonnegative)
 
     def test_models(self):
         self.base_test_models()

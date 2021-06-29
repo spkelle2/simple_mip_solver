@@ -17,35 +17,33 @@ from simple_mip_solver.algorithms.utils import Utils
 from test_simple_mip_solver.example_models import cut1, infeasible, no_branch, cut2
 from test_simple_mip_solver.helpers import TestModels
 
-cut1_std = Utils._standardize_model(cut1)
-cut2_std = Utils._standardize_model(cut2)
-infeasible_std = Utils._standardize_model(infeasible)
-no_branch_std = Utils._standardize_model(no_branch)
-
 
 class TestNode(TestModels):
     Node = CuttingPlaneBoundNode  # define this for the TestModels attribute
 
     def setUp(self) -> None:
         # reset models each test so lps dont keep added constraints
-        for name, m in {'cut1_std': cut1_std, 'cut2_std': cut2_std,
-                        'infeasible_std': infeasible_std, 'no_branch_std': no_branch_std}.items():
+        for name, m in {'cut1_std': cut1, 'cut2_std': cut2,
+                        'infeasible_std': infeasible, 'no_branch_std': no_branch}.items():
             lp = m.lp
-            new_m = MILPInstance(A=lp.coefMatrix.toarray(), b=lp.constraintsLower,
-                                 c=lp.objective, sense=['Min', '>='],
+            new_m = MILPInstance(A=m.A, b=m.b, c=lp.objective, l=m.l, sense=['Min', m.sense],
                                  integerIndices=m.integerIndices, numVars=len(lp.objective))
+            new_m = Utils._convert_constraints_to_greq(new_m)
             setattr(self, name, new_m)
 
     # get utils working then test with standardized model
     def test_init(self):
-        CuttingPlaneBoundNode(cut1_std.lp, cut1_std.integerIndices)
+        CuttingPlaneBoundNode(self.cut1_std.lp, self.cut1_std.integerIndices)
 
     def test_init_fails_asserts(self):
         self.assertRaisesRegex(AssertionError, 'must have Ax >= b',
                                CuttingPlaneBoundNode, cut1.lp, cut1.integerIndices)
-        m = Utils._convert_constraints_to_greq(cut1)
+        l = self.cut1_std.lp.variablesLower.copy()
+        l[0] = -10
+        self.cut1_std.lp.variablesLower = l
         self.assertRaisesRegex(AssertionError, 'must have x >= 0 in constraints',
-                               CuttingPlaneBoundNode, m.lp, m.integerIndices)
+                               CuttingPlaneBoundNode, self.cut1_std.lp,
+                               self.cut1_std.integerIndices)
 
     def test_bound(self):
         # check function calls
@@ -67,12 +65,12 @@ class TestNode(TestModels):
             self.assertTrue(aogc.called)
 
         # check return
-        node = CuttingPlaneBoundNode(cut1_std.lp, cut1_std.integerIndices)
+        node = CuttingPlaneBoundNode(self.cut1_std.lp, self.cut1_std.integerIndices)
         rtn = node.bound()  # come back and fix after done rest
         self.assertTrue(isinstance(rtn, dict), 'should return dict')
 
     def test_add_optimized_gomory_cuts(self):
-        node = CuttingPlaneBoundNode(self.cut2_std.lp, cut2_std.integerIndices)
+        node = CuttingPlaneBoundNode(self.cut2_std.lp, self.cut2_std.integerIndices)
         # check function calls
         with patch.object(node, '_find_gomory_cuts') as fgb, \
                 patch.object(node, '_optimize_cut') as oc:

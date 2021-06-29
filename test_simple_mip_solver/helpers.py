@@ -40,5 +40,7 @@ class TestModels(unittest.TestCase):
             bb.solve()
             gu_mdl = gu.read(pth)
             gu_mdl.optimize()
+            print(bb.objective_value)
+            print(gu_mdl.objVal)
             self.assertTrue(isclose(bb.objective_value, gu_mdl.objVal, abs_tol=.01),
                             f'different for {file}')

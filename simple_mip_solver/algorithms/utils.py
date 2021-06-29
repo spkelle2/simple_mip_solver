@@ -12,11 +12,10 @@ class Utils:
     """Parent class to those used to solve Mixed Integer Linear Programs. Contains
     utility functions useful across multiple classes of algorithms"""
     def __init__(self: U, model: MILPInstance, Node: Any, node_attributes: List[str],
-                 node_funcs: List[str], standardize_model=False):
+                 node_funcs: List[str]):
         # model asserts
         assert isinstance(model, MILPInstance), 'model must be cuppy MILPInstance'
-        if standardize_model:
-            model = self._standardize_model(model)
+        model = self._convert_constraints_to_greq(model)
 
         # Node asserts
         assert inspect.isclass(Node), 'Node must be a class'
@@ -36,16 +35,6 @@ class Utils:
         self._kwargs = {}
 
     @staticmethod
-    def _standardize_model(model: MILPInstance) -> MILPInstance:
-        """ convert model to standard form with bounds as constraints
-
-        :param model:
-        :return:
-        """
-        model = Utils._convert_constraints_to_greq(model)
-        return Utils._move_bounds_to_constraints(model)
-
-    @staticmethod
     def _convert_constraints_to_greq(model: MILPInstance) -> MILPInstance:
         """ If constraints are of the form A <= b, convert them to A >= b
 
@@ -61,31 +50,6 @@ class Utils:
                                 sense=['Min', '>='], numVars=len(model.c))
         else:
             return model
-
-    @staticmethod
-    def _move_bounds_to_constraints(model: MILPInstance) -> MILPInstance:
-        """ Add the bounds of each variable to the constraint matrix and then
-        get rid of the bounds in the model. We do this to enable use of cut
-        generators and display
-
-        :param model: the model to convert
-        :return: the updated model
-        """
-        infinity = model.lp.getCoinInfinity()
-        lp = model.lp
-        assert (lp.constraintsUpper >= infinity).all(), \
-            'this function assumes all constraints are lower bounded'
-        x = lp.getVarByName('x')
-        for i in range(lp.nCols):
-            e = CyLPArray(np.zeros(lp.nCols))
-            e[i] = 1
-            if lp.variablesUpper[i] < infinity:
-                lp.addConstraint(-e * x >= -lp.variablesUpper[i])
-            if lp.variablesLower[i] > -infinity:
-                lp.addConstraint(e * x >= lp.variablesLower[i])
-        return MILPInstance(A=lp.coefMatrix.toarray(), b=lp.constraintsLower, c=lp.objective,
-                            sense=['Min', '>='], integerIndices=model.integerIndices,
-                            numVars=len(lp.objective))
 
     def _process_rtn(self: U, rtn: Dict[str, Any]):
         """ Assign the values of <rtn> to their keyed attributes
