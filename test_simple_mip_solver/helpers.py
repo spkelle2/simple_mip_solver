@@ -35,12 +35,14 @@ class TestModels(unittest.TestCase):
             print(f'running test {i + 1}')
             pth = os.path.join(fldr, file)
             model = MILPInstance(file_name=pth)
-            bb = BranchAndBound(model, self.Node, pseudo_costs={},
-                                standardize_model=standardize_model)
+            bb = BranchAndBound(model, self.Node, pseudo_costs={})
             bb.solve()
             gu_mdl = gu.read(pth)
+            gu_mdl.setParam(gu.GRB.Param.LogToConsole, 0)
             gu_mdl.optimize()
-            print(bb.objective_value)
-            print(gu_mdl.objVal)
+            if not isclose(bb.objective_value, gu_mdl.objVal, abs_tol=.01):
+                print(f'different for {file}')
+                print(f'mine: {bb.objective_value}')
+                print(f'gurobi: {gu_mdl.objVal}')
             self.assertTrue(isclose(bb.objective_value, gu_mdl.objVal, abs_tol=.01),
                             f'different for {file}')

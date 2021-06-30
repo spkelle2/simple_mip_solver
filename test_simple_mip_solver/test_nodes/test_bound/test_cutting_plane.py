@@ -14,7 +14,7 @@ from unittest.mock import patch
 
 from simple_mip_solver import CuttingPlaneBoundNode, BaseNode
 from simple_mip_solver.algorithms.utils import Utils
-from test_simple_mip_solver.example_models import cut1, infeasible, no_branch, cut2
+from test_simple_mip_solver.example_models import cut1, infeasible, no_branch, cut2, cut3
 from test_simple_mip_solver.helpers import TestModels
 
 
@@ -108,7 +108,6 @@ class TestNode(TestModels):
 
     def test_models(self):
         self.base_test_models(standardize_model=True)
-
 
 if __name__ == '__main__':
     unittest.main()

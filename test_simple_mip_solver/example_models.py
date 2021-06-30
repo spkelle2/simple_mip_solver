@@ -1,5 +1,6 @@
 from coinor.cuppy.milpInstance import MILPInstance
 from coinor.grumpy.BranchAndBound import GenerateRandomMIP
+from cylp.cy import CyClpSimplex
 from cylp.py.modeling.CyLPModel import CyLPArray
 from itertools import product
 import pandas as pd
@@ -24,11 +25,11 @@ def generate_random_MILPInstance(numVars=40, numCons=20, density=0.2,
 
 
 def generate_random_variety():
-    constraints = {10: 'low', 20: 'high'}
-    variables = {10: 'low', 20: 'high'}
+    constraints = {2: 'low', 4: 'high'}
+    variables = {2: 'low', 4: 'high'}
     densities = {.2: 'low', .8: 'high'}
-    max_obj_coeffs = {10: 'low', 1000: 'high'}
-    max_cons_coeffs = {10: 'low', 1000: 'high'}
+    max_obj_coeffs = {10: 'low', 100: 'high'}
+    max_cons_coeffs = {10: 'low', 100: 'high'}
     tightnesses = {2: 'low', 8: 'high'}
 
     for constraint, variable, density, max_obj_coeff, max_cons_coeff, \

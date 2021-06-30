@@ -71,7 +71,7 @@ class BranchAndBound(Utils):
         self._global_lower_bound = -float('inf')
         self._node_count = 0
         self._node_limit = node_limit
-        self._kwargs = kwargs or {}
+        self._kwargs['b'] = self.model.b
 
     def solve(self: B) -> None:
         """Solves the Branch and Bound algorithm using the bound, search, and
