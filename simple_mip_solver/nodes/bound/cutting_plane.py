@@ -19,15 +19,11 @@ class CuttingPlaneBoundNode(BaseNode):
         super().__init__(*args, **kwargs)
         assert self._sense == '>=', 'must have Ax >= b'
         assert self._variables_nonnegative, 'must have x >= 0 in constraints'
-        self.cuts = []
-        self.x = np.array([0,0,1,0])
-        self.b = None
 
     def branch(self: G, **kwargs: Any) -> Dict[str, Any]:
         return super().branch(**kwargs)
 
-    def bound(self: G, cuts: List[CyLPExpr] = None, optimized_gomory_cuts: bool = True,
-              **kwargs: Any) -> Dict[str, Any]:
+    def bound(self: G, optimized_gomory_cuts: bool = True, **kwargs: Any) -> Dict[str, Any]:
         """ Extends BaseNode's bound by finding a variety of cuts to add after
         solving the LP relaxation
 
@@ -37,16 +33,12 @@ class CuttingPlaneBoundNode(BaseNode):
         :return: rtn, the dictionary returned by the bound method of classes
         with lower priority in method order resolution
         """
-        if cuts:
-            self.cuts.extend(cuts)
-        self.b = kwargs['b']
         # inherit this class before others for combos to work
         # https://stackoverflow.com/questions/27954695/what-is-a-sibling-class-in-python
         rtn = super().bound(**kwargs)
         if self.lp_feasible and not self.mip_feasible:
             if optimized_gomory_cuts:
                 self._add_optimized_gomory_cuts(**kwargs)
-        rtn['cuts'] = self.cuts
         return rtn
 
     def _add_optimized_gomory_cuts(self: G, **kwargs: Any):
@@ -56,22 +48,11 @@ class CuttingPlaneBoundNode(BaseNode):
         :param kwargs: dictionary of arguments to pass on to selected subroutines
         :return:
         """
-        A = self._lp.coefMatrix.toarray()
-        b = self._lp.constraintsLower
-        # for debugging
-        # if len(self.cuts) == 3:
-        #     print()
         for pi, pi0 in self._find_gomory_cuts():
             # max gives most restrictive lower bound, which we want b/c >= constraints
             pi0 = max(self._optimize_cut(pi, **kwargs), pi0)
             cut = pi * self._lp.getVarByName('x') >= pi0
             self._lp.addConstraint(cut)
-            # for debugging
-            # if this cut violates optimal solution but optimal solution would be feasible otherwise
-            # if sum(cut.left.left * self.x) < cut.right and (A.dot(self.x) >= b).all():
-            #     print()
-            self.cuts.append(cut)
-
 
     def _find_gomory_cuts(self: G) -> List[Tuple[np.ndarray, float]]:
         """Find Gomory Mixed Integer Cuts (GMICs) for this node's solution.
@@ -99,13 +80,13 @@ class CuttingPlaneBoundNode(BaseNode):
                      (1 - f[j])/(1 - f0) if j in self._integer_indices else
                      a[j]/f0 if a[j] > 0 else -a[j]/(1 - f0) for j in self._var_indices]
                 )
-                # slack variable (including bounds) coefficients in GMI cut
+                # slack variable coefficients in GMI cut
                 pi_slacks = np.array([x/f0 if x > 0 else -x/(1 - f0) for x in
                                       self._lp.tableau[row_idx, self._lp.nVariables:]])
                 # sub out slack variables for primary variables. Ax >= b =>'s
-                # Ax - s = b => s = Ax - b. gomory is pi*x + pi_slacks*s >= 1, thus
-                # pi*x + pi_slacks*(Ax - b) >= 1 => (pi + pi_slacks*A)*x >= 1 + pi_slacks*b
-                pi += pi_slacks * self._lp.coefMatrix
+                # Ax - s = b => s = Ax - b. gomory is pi^T * x + pi_s^T * s >= 1, thus
+                # pi^T * x + pi_s^T * (Ax - b) >= 1 => (pi + A^T * pi_s)^T * x >= 1 + pi_s^T * b
+                pi += self._lp.coefMatrix.T * pi_slacks
                 pi0 = 1 + np.dot(pi_slacks, self._lp.constraintsLower)
                 # append pi >= pi0
                 cuts.append((pi, pi0))

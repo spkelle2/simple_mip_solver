@@ -17,23 +17,21 @@ class TestUtils(unittest.TestCase):
     _node_funcs = ['bound', 'branch', '__lt__', '__eq__']
 
     def test_init(self):
-        with patch.object(Utils, '_standardize_model') as sm:
-            alg = Utils(small_branch, BaseNode, self._node_attributes, self._node_funcs)
 
-            # check attributes
-            self.assertTrue(inspect.isclass(alg._Node))
-            self.assertTrue(alg._root_node)
-            self.assertTrue(alg.model)
-            self.assertFalse(alg._kwargs)
+        alg = Utils(small_branch, BaseNode, self._node_attributes, self._node_funcs)
 
-            # check function calls
-            self.assertFalse(sm.called)
+        # check attributes
+        self.assertTrue(inspect.isclass(alg._Node))
+        self.assertTrue(alg._root_node)
+        self.assertTrue(alg.model)
+        self.assertFalse(alg._kwargs)
 
-        with patch.object(Utils, '_standardize_model') as sm:
-            sm.return_value = small_branch
+        # check function calls
+        with patch.object(Utils, '_convert_constraints_to_greq') as cctg:
+            cctg.return_value = small_branch
             alg = Utils(small_branch, BaseNode, self._node_attributes,
                         self._node_funcs, standardize_model=True)
-            self.assertTrue(sm.called)
+            self.assertTrue(cctg.called)
 
     def test_init_fails_asserts(self):
         lp = CyClpSimplex()
@@ -69,16 +67,6 @@ class TestUtils(unittest.TestCase):
                                    Utils, small_branch, BadNode, self._node_attributes,
                                    self._node_funcs)
 
-    def test_standardize_model(self):
-        alg = Utils(small_branch, BaseNode, self._node_attributes, self._node_funcs)
-
-        # check function calls
-        with patch.object(Utils, '_convert_constraints_to_greq') as cctg, \
-                patch.object(Utils, '_move_bounds_to_constraints') as mbtc:
-            alg._standardize_model(alg.model)
-            self.assertTrue(cctg.called)
-            self.assertTrue(mbtc.called)
-
     def test_convert_constraints_to_greq(self):
         # check one that needs changed
         m = Utils._convert_constraints_to_greq(small_branch)
@@ -91,25 +79,6 @@ class TestUtils(unittest.TestCase):
         self.assertTrue(m2.sense == '>=')
         self.assertTrue((m2.A == m.A).all())
         self.assertTrue((m2.b == m.b).all())
-
-    def test_move_bounds_to_constraints_fails_asserts(self):
-        self.assertRaises(AssertionError, Utils._move_bounds_to_constraints,
-                          small_branch)
-
-    def test_move_bounds_to_constraints(self):
-        m = Utils._convert_constraints_to_greq(small_branch)
-        m = Utils._move_bounds_to_constraints(m)
-        coefs = np.matrix([[-1, 0, -1],
-                           [0, -1, 0],
-                           [-1, 0, 0],
-                           [1, 0, 0],
-                           [0, -1, 0],
-                           [0, 1, 0],
-                           [0, 0, -1],
-                           [0, 0, 1]])
-        b_transpose = CyLPArray([-1.5, -1.25, -10, 0, -10, 0, -10, 0])
-        self.assertTrue((m.lp.coefMatrix.toarray() == coefs).all())
-        self.assertTrue((m.lp.constraintsLower == b_transpose).all())
 
     def test_process_rtn_fails_asserts(self):
         alg = Utils(small_branch, BaseNode, self._node_attributes, self._node_funcs)

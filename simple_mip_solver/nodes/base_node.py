@@ -4,7 +4,6 @@ from cylp.cy.CyClpSimplex import CyClpSimplex
 from cylp.py.modeling.CyLPModel import CyLPArray
 from math import floor, ceil
 import numpy as np
-import re
 from typing import Union, List, TypeVar, Dict, Any
 
 T = TypeVar('T', bound='BaseNode')
@@ -119,7 +118,6 @@ class BaseNode:
 
         # create new lp's for each direction
         children = {'up': CyClpSimplex(), 'down': CyClpSimplex()}
-        A = np.matrix(self._lp.coefMatrix.toarray())
         for direction, lp in children.items():
             x = lp.addVariable('x', self._lp.nCols)
             l = CyLPArray(self._lp.variablesLower.copy())
@@ -128,9 +126,9 @@ class BaseNode:
                 u[idx] = floor(b_val)
             else:
                 l[idx] = ceil(b_val)
-            lp +=  l <= x <= u
-            lp += CyLPArray(self._lp.constraintsLower.copy()) <= A * x \
-                  <= CyLPArray(self._lp.constraintsUpper.copy())
+            lp += l <= x <= u
+            lp += CyLPArray(self._lp.constraintsLower.copy()) <= self._lp.coefMatrix * x \
+                <= CyLPArray(self._lp.constraintsUpper.copy())
             lp.objective = self._lp.objective
             lp.setBasisStatus(*basis)  # warm start
 

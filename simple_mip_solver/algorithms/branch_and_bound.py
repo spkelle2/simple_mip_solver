@@ -23,8 +23,7 @@ class BranchAndBound(Utils):
     # these kwargs get passed to the branch and bound functions
     # so **kwargs = {'strong_branch_iters': 5, 'pseudo_costs': {}}
     def __init__(self: B, model: MILPInstance, Node: Any = BaseNode,
-                 node_queue: Any = None, node_limit: int = float('inf'),
-                 standardize_model: bool = False, **kwargs: Any):
+                 node_queue: Any = None, node_limit: int = float('inf'), **kwargs: Any):
         f""" Instantiates a Branch and Bound instance.
         
         :param model: A MILPInstance object that defines the MILP we solve
@@ -44,7 +43,7 @@ class BranchAndBound(Utils):
 
         # call super
         super().__init__(model=model, Node=Node, node_attributes=self._node_attributes,
-                         node_funcs=self._node_funcs)
+                         node_funcs=self._node_funcs, **kwargs)
 
         # node_queue asserts
         for func in self._queue_funcs:
@@ -71,7 +70,6 @@ class BranchAndBound(Utils):
         self._global_lower_bound = -float('inf')
         self._node_count = 0
         self._node_limit = node_limit
-        self._kwargs['b'] = self.model.b
 
     def solve(self: B) -> None:
         """Solves the Branch and Bound algorithm using the bound, search, and

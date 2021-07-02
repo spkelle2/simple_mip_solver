@@ -12,7 +12,7 @@ class Utils:
     """Parent class to those used to solve Mixed Integer Linear Programs. Contains
     utility functions useful across multiple classes of algorithms"""
     def __init__(self: U, model: MILPInstance, Node: Any, node_attributes: List[str],
-                 node_funcs: List[str]):
+                 node_funcs: List[str], **kwargs: Any):
         # model asserts
         assert isinstance(model, MILPInstance), 'model must be cuppy MILPInstance'
         model = self._convert_constraints_to_greq(model)
@@ -32,7 +32,7 @@ class Utils:
         self._Node = Node
         self._root_node = root_node
         self.model = model
-        self._kwargs = {}
+        self._kwargs = kwargs
 
     @staticmethod
     def _convert_constraints_to_greq(model: MILPInstance) -> MILPInstance:
