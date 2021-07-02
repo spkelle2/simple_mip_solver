@@ -57,8 +57,7 @@ class CuttingPlaneBoundNode(BaseNode):
     def _find_gomory_cuts(self: G) -> List[Tuple[np.ndarray, float]]:
         """Find Gomory Mixed Integer Cuts (GMICs) for this node's solution.
         Defined in Lehigh University ISE 418 lecture 14 slide 18 and 5.31
-        in Conforti et al Integer Programming. Assumes Ax >= b and the bounds
-        x >= 0 exist and have been added to constraints.
+        in Conforti et al Integer Programming. Assumes Ax >= b and x >= 0.
 
         :return: cuts, a list of tuples (pi, pi0) that represent the cut pi*x >= pi0
         """
@@ -115,4 +114,4 @@ class CuttingPlaneBoundNode(BaseNode):
         bb = BranchAndBound(model=model, Node=BaseNode,
                             node_limit=cut_optimization_node_limit, pseudo_costs={})
         bb.solve()
-        return bb._global_lower_bound
+        return bb.objective_value if bb.status == 'optimal' else bb._global_lower_bound

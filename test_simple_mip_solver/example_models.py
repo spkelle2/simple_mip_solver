@@ -101,7 +101,7 @@ A = np.matrix([[-8, 30],
 b = CyLPArray([[115],
                [1],
                [127]])
-c = CyLPArray([1, 1])
+c = CyLPArray([0, 1])
 l = CyLPArray([0, 0])
 
 cut1 = MILPInstance(A=A, b=b, c=c, l=l, sense=['Max', '<='],

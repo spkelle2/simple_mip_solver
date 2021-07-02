@@ -1,5 +1,3 @@
-from cylp.cy import CyClpSimplex
-import inspect
 from queue import PriorityQueue
 import unittest
 from unittest.mock import patch

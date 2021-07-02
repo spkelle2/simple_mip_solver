@@ -100,8 +100,7 @@ class BranchAndBound(Utils):
             return
         self._node_count += 1
 
-        self._process_rtn(node.bound(**self._kwargs))  # check inputs
-        self._update_lower_bound(node)
+        self._process_rtn(node.bound(**self._kwargs))
 
         # this solver is not designed to handle unboundedness accurately
         # need feasible milp solution, but may never find one, so assumes we do
@@ -113,22 +112,8 @@ class BranchAndBound(Utils):
                 self._best_solution = node.solution
                 self._global_upper_bound = node.objective_value
             else:
-                self._process_branch_rtn(node.branch(**self._kwargs))  # check inputs
-
-    def _update_lower_bound(self, node: T):
-        """ Updates the global lower bound of the branch and bound tree. The lower
-        bound on a node could very well change after bounding it, so if its
-        initial lower bound was also the global lower bound, we need to ensure
-        the global lower bound is recalculated to get its current value
-
-        :param node: The node being evaluated
-        :return:
-        """
-        assert node.lp_feasible is not None, 'we need to bound before updating'
-        if node.lower_bound <= self._global_lower_bound:
-            self._global_lower_bound = min(
-                [node.objective_value] + [n.lower_bound for n in self._node_queue.queue]
-            )
+                self._process_branch_rtn(node.branch(**self._kwargs))
+                self._global_lower_bound = min(n.lower_bound for n in self._node_queue.queue)
 
     def _process_branch_rtn(self: B, rtn: Dict[str, Any]):
         """ Pull the nodes returned from branching out of the rtn dict and into

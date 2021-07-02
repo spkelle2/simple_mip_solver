@@ -106,8 +106,8 @@ class TestNode(TestModels):
         self.assertTrue(isclose(pi0, -15, abs_tol=.01))
 
     def test_models(self):
-        # self.base_test_models(standardize_model=True)
-        pass
+        self.base_test_models(standardize_model=True)
+        # pass
 
 
 if __name__ == '__main__':
