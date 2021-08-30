@@ -1,0 +1,16 @@
+name: simple_mip_solver
+channels:
+  - conda-forge
+  - https://conda.anaconda.org/gurobi
+  - defaults
+dependencies:
+  - coin-or-cbc
+  - future
+  - gurobi
+  - numpy
+  - pandas
+  - pip
+  - python=3.8
+  - pip:
+    - coinor-cuppy
+    - cylp
