@@ -18,10 +18,10 @@ class CuttingPlaneBoundNode(BaseNode):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         assert self._sense == '>=', 'must have Ax >= b'
-        assert self._variables_nonnegative, 'must have x >= 0 in constraints'
+        assert self._variables_nonnegative, 'must have x >= 0 for all variables'
 
-    def branch(self: G, **kwargs: Any) -> Dict[str, Any]:
-        return super().branch(**kwargs)
+    # def branch(self: G, **kwargs: Any) -> Dict[str, Any]:
+    #     return super().branch(**kwargs)
 
     def bound(self: G, optimized_gomory_cuts: bool = True, **kwargs: Any) -> Dict[str, Any]:
         """ Extends BaseNode's bound by finding a variety of cuts to add after
@@ -58,6 +58,10 @@ class CuttingPlaneBoundNode(BaseNode):
         """Find Gomory Mixed Integer Cuts (GMICs) for this node's solution.
         Defined in Lehigh University ISE 418 lecture 14 slide 18 and 5.31
         in Conforti et al Integer Programming. Assumes Ax >= b and x >= 0.
+
+        Warning: this method does not currently work. It creates some cuts that
+        are invalid. Stuck on debugging because I can't spot the difference between
+        this and what is referenced above.
 
         :return: cuts, a list of tuples (pi, pi0) that represent the cut pi*x >= pi0
         """
@@ -115,3 +119,5 @@ class CuttingPlaneBoundNode(BaseNode):
                             node_limit=cut_optimization_node_limit, pseudo_costs={})
         bb.solve()
         return bb.objective_value if bb.status == 'optimal' else bb._global_lower_bound
+        # need lower bound because upper bound is furthest feasible point intersecting
+        # the cut. lower bound then ensures no feasible points cut

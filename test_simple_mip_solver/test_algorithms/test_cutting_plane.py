@@ -1,10 +1,8 @@
 from coinor.cuppy.milpInstance import MILPInstance
-from cylp.py.modeling.CyLPModel import CyLPArray
 
 from math import isclose
 import numpy as np
 import unittest
-from unittest.mock import patch
 
 from simple_mip_solver import CuttingPlane
 from simple_mip_solver.algorithms.utils import Utils

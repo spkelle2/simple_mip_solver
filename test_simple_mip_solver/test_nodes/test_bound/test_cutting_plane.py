@@ -41,7 +41,7 @@ class TestNode(TestModels):
         l = self.cut1_std.lp.variablesLower.copy()
         l[0] = -10
         self.cut1_std.lp.variablesLower = l
-        self.assertRaisesRegex(AssertionError, 'must have x >= 0 in constraints',
+        self.assertRaisesRegex(AssertionError, 'must have x >= 0 for all variables',
                                CuttingPlaneBoundNode, self.cut1_std.lp,
                                self.cut1_std.integerIndices)
 

@@ -1,13 +1,11 @@
 from cylp.cy import CyClpSimplex
-from cylp.py.modeling.CyLPModel import CyLPArray
 import inspect
-import numpy as np
 import unittest
 from unittest.mock import patch
 
 from simple_mip_solver import BaseNode
 from simple_mip_solver.algorithms.utils import Utils
-from test_simple_mip_solver.example_models import small_branch, cut1
+from test_simple_mip_solver.example_models import small_branch
 
 
 class TestUtils(unittest.TestCase):
@@ -24,7 +22,7 @@ class TestUtils(unittest.TestCase):
         self.assertTrue(inspect.isclass(alg._Node))
         self.assertTrue(alg._root_node)
         self.assertTrue(alg.model)
-        self.assertFalse(alg._kwargs)
+        self.assertTrue(alg._kwargs == {'next_node_idx': 1})
 
         # check function calls
         with patch.object(Utils, '_convert_constraints_to_greq') as cctg:
@@ -66,6 +64,11 @@ class TestUtils(unittest.TestCase):
             self.assertRaisesRegex(AssertionError, f'Node needs a {func}',
                                    Utils, small_branch, BadNode, self._node_attributes,
                                    self._node_funcs)
+
+        # kwarg asserts
+        self.assertRaisesRegex(AssertionError, 'next_node_idx is reserved',
+                               Utils, small_branch, BaseNode, self._node_attributes,
+                               self._node_funcs, next_node_idx=1)
 
     def test_convert_constraints_to_greq(self):
         # check one that needs changed

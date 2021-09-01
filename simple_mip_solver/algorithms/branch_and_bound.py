@@ -1,4 +1,5 @@
 from coinor.cuppy.milpInstance import MILPInstance
+from coinor.gimpy.tree import BinaryTree
 from queue import PriorityQueue
 from typing import Any, Dict, TypeVar
 
@@ -16,7 +17,7 @@ class BranchAndBound(Utils):
 
     _node_attributes = ['lower_bound', 'objective_value', 'solution',
                         'lp_feasible', 'mip_feasible', 'search_method',
-                        'branch_method']
+                        'branch_method', 'idx']
     _node_funcs = ['bound', 'branch', '__lt__', '__eq__']
     _queue_funcs = ['put', 'get', 'empty']
 
@@ -55,8 +56,8 @@ class BranchAndBound(Utils):
             "node limit must be integer or infinity"
 
         # kwargs assert
-        assert set(kwargs.keys()).isdisjoint({'up', 'down'}), \
-            'keys "up" and "down" are saved for later use'
+        assert set(kwargs.keys()).isdisjoint({'right', 'left'}), \
+            'keys "right" and "left" are saved for later use'
         assert all(isinstance(k, str) for k in kwargs), 'kwargs keys must be strings'
 
         # instantiate
@@ -68,8 +69,9 @@ class BranchAndBound(Utils):
         self.objective_value = None
         self._global_upper_bound = float('inf')
         self._global_lower_bound = -float('inf')
-        self._node_count = 0
         self._node_limit = node_limit
+        self._tree = BinaryTree()
+        self._tree.add_root(self._root_node.idx, node=self._root_node)
 
     def solve(self: B) -> None:
         """Solves the Branch and Bound algorithm using the bound, search, and
@@ -81,7 +83,7 @@ class BranchAndBound(Utils):
         self._node_queue.put(self._root_node)
 
         while not (self._node_queue.empty() or self._unbounded or
-                   self._node_count >= self._node_limit):
+                   self._evaluated_nodes >= self._node_limit):
             self._evaluate_node(self._node_queue.get())
 
         self.status = 'unbounded' if self._unbounded else 'optimal' if \
@@ -98,7 +100,7 @@ class BranchAndBound(Utils):
         """
         if node.lower_bound >= self._global_upper_bound:
             return
-        self._node_count += 1
+        self._evaluated_nodes += 1
 
         self._process_rtn(node.bound(**self._kwargs))
 
@@ -112,22 +114,30 @@ class BranchAndBound(Utils):
                 self._best_solution = node.solution
                 self._global_upper_bound = node.objective_value
             else:
-                self._process_branch_rtn(node.branch(**self._kwargs))
+                self._process_branch_rtn(node.idx, node.branch(**self._kwargs))
                 self._global_lower_bound = min(n.lower_bound for n in self._node_queue.queue)
 
-    def _process_branch_rtn(self: B, rtn: Dict[str, Any]):
+    # todo check this is called with given arguments from evaluate node
+    def _process_branch_rtn(self: B, parent_id: int, rtn: Dict[str, Any]):
         """ Pull the nodes returned from branching out of the rtn dict and into
-        the node queue before updating the rest of the key value pairs in _kwargs
+        the node queue and branch and bound tree before updating the rest of the
+        key value pairs in _kwargs
 
         :param rtn:
         :return:
         """
         assert isinstance(rtn, dict), 'rtn must be a dictionary'
-        for direction in ['up', 'down']:
+        assert isinstance(parent_id, int), 'parent_id must be integer'
+        assert parent_id in self._tree, 'parent must already exist in tree'
+        # left is down right is up
+        for direction in ['left', 'right']:
             assert direction in rtn, f'{direction} must be in the returned dict'
             assert isinstance(rtn[direction], self._Node), \
                 f'{direction} value must be type {type(self._Node)}'
+            assert rtn[direction].idx not in self._tree, 'please give unique node ID'
             self._node_queue.put(rtn[direction])
+            getattr(self._tree, f'add_{direction}_child')(rtn[direction].idx, parent_id,
+                                                          node=rtn[direction])
             del rtn[direction]
         self._process_rtn(rtn)
 

@@ -32,21 +32,21 @@ class TestNode(TestModels):
         rtn = node.bound({})
 
         # check assignments
-        for idx, direction in product([1, 2], ['up', 'down']):
+        for idx, direction in product([1, 2], ['right', 'left']):
             self.assertTrue(node.pseudo_costs[idx][direction]['times'] == 1)
-            if idx == 1 and direction == 'down':
+            if idx == 1 and direction == 'left':
                 self.assertTrue(node.pseudo_costs[idx][direction]['cost'] == 1)
             else:
                 self.assertTrue(node.pseudo_costs[idx][direction]['cost'] == 0)
         self.assertTrue(node.strong_branch_iters == 5)
 
         # check returns
-        for idx, direction in product([1, 2], ['up', 'down']):
-            self.assertTrue(rtn['_pseudo_costs'][idx][direction]['times'] == 1)
-            if idx == 1 and direction == 'down':
-                self.assertTrue(rtn['_pseudo_costs'][idx][direction]['cost'] == 1)
+        for idx, direction in product([1, 2], ['right', 'left']):
+            self.assertTrue(rtn['pseudo_costs'][idx][direction]['times'] == 1)
+            if idx == 1 and direction == 'left':
+                self.assertTrue(rtn['pseudo_costs'][idx][direction]['cost'] == 1)
             else:
-                self.assertTrue(rtn['_pseudo_costs'][idx][direction]['cost'] == 0)
+                self.assertTrue(rtn['pseudo_costs'][idx][direction]['cost'] == 0)
 
         # check function calls
         node = PseudoCostBranchNode(small_branch.lp, small_branch.integerIndices)
@@ -80,9 +80,9 @@ class TestNode(TestModels):
         # check we call strong branch once and calculate costs twice for each sb_index
         with patch.object(node, '_strong_branch') as sb, \
                 patch.object(node, '_calculate_costs') as cc:
-            sb.return_value = {'up': PseudoCostBranchNode(small_branch.lp,
+            sb.return_value = {'right': PseudoCostBranchNode(small_branch.lp,
                                                           small_branch.integerIndices),
-                               'down': PseudoCostBranchNode(small_branch.lp,
+                               'left': PseudoCostBranchNode(small_branch.lp,
                                                             small_branch.integerIndices)}
             node._update_pseudo_costs()
             self.assertTrue(sb.call_count == 2)
@@ -91,18 +91,18 @@ class TestNode(TestModels):
         # branch on 2 (len(sb_index) = 1)
         # check we call strong branch len(sb_index) times and calc costs 2*len(sb_index) + 1
         rtn = node._base_branch(2)  # force x0 to go from int to fractional
-        down_node = rtn['down']  # just do down bc up infeasible
-        down_node.pseudo_costs = {
-            1: {'up': {'cost': 0, 'times': 1}, 'down': {'cost': 1, 'times': 1}},
-            2: {'up': {'cost': 0, 'times': 1}, 'down': {'cost': 0, 'times': 1}}}
-        down_node._base_bound()
-        with patch.object(down_node, '_strong_branch') as sb, \
-                patch.object(down_node, '_calculate_costs') as cc:
-            sb.return_value = {'up': PseudoCostBranchNode(small_branch.lp,
+        left_node = rtn['left']  # just do left bc right infeasible
+        left_node.pseudo_costs = {
+            1: {'right': {'cost': 0, 'times': 1}, 'left': {'cost': 1, 'times': 1}},
+            2: {'right': {'cost': 0, 'times': 1}, 'left': {'cost': 0, 'times': 1}}}
+        left_node._base_bound()
+        with patch.object(left_node, '_strong_branch') as sb, \
+                patch.object(left_node, '_calculate_costs') as cc:
+            sb.return_value = {'right': PseudoCostBranchNode(small_branch.lp,
                                                           small_branch.integerIndices),
-                               'down': PseudoCostBranchNode(small_branch.lp,
+                               'left': PseudoCostBranchNode(small_branch.lp,
                                                             small_branch.integerIndices)}
-            down_node._update_pseudo_costs()
+            left_node._update_pseudo_costs()
             self.assertTrue(sb.call_count == 1)
             self.assertTrue(cc.call_count == 3)
 
@@ -112,26 +112,26 @@ class TestNode(TestModels):
         node._base_bound()
 
         # check that each fractional index gets proper pseudo cost instantiated
-        # check that infeasible strong branch direction gets (0, 1) ie up and x >= 2
+        # check that infeasible strong branch direction gets (0, 1) ie right and x >= 2
         for idx in [1, 2]:
             for strong_branch_node in node._strong_branch(idx).values():
                 node._calculate_costs(strong_branch_node)
-        for idx, direction in product([1, 2], ['up', 'down']):
+        for idx, direction in product([1, 2], ['right', 'left']):
             self.assertTrue(node.pseudo_costs[idx][direction]['times'] == 1)
-            if idx == 1 and direction == 'down':
+            if idx == 1 and direction == 'left':
                 self.assertTrue(node.pseudo_costs[idx][direction]['cost'] == 1)
             else:
                 self.assertTrue(node.pseudo_costs[idx][direction]['cost'] == 0)
 
         # check that branched on index updates the instantiated value correctly
-        rtn = node._base_branch(1)
+        rtn = {k: v for k, v in node._base_branch(1).items() if k in ['left', 'right']}
         for direction, child_node in rtn.items():
             child_node.pseudo_costs = node.pseudo_costs
             child_node._base_bound()
             child_node._calculate_costs(child_node)
-        for direction in ['up', 'down']:
+        for direction in ['right', 'left']:
             self.assertTrue(node.pseudo_costs[1][direction]['times'] == 2)
-            if direction == 'down':
+            if direction == 'left':
                 self.assertTrue(node.pseudo_costs[1][direction]['cost'] == 1)
             else:
                 self.assertTrue(node.pseudo_costs[1][direction]['cost'] == 0)
@@ -155,7 +155,7 @@ class TestNode(TestModels):
                 patch.object(node, '_base_branch') as bb:
             cpc.return_value = []
             bpci.return_value = 2
-            node.branch(rtn['_pseudo_costs'])
+            node.branch(rtn['pseudo_costs'], )
             self.assertTrue(cpc.called)
             self.assertTrue(bpci.called)
             self.assertTrue(bb.called)
@@ -163,21 +163,21 @@ class TestNode(TestModels):
         # check return
         node = PseudoCostBranchNode(small_branch.lp, small_branch.integerIndices)
         rtn = node.bound({})
-        rtn = node.branch(rtn['_pseudo_costs'])
-        for direction in ['up', 'down']:
+        rtn = node.branch(rtn['pseudo_costs'], )
+        for direction in ['right', 'left']:
             self.assertTrue(direction in rtn,
                             f'{direction} must be in the returned dict')
             self.assertTrue(isinstance(rtn[direction], PseudoCostBranchNode))
 
     def test_best_pseudo_cost_index(self):
-        pc = {1: {'up': {'cost': 1, 'times': 1}, 'down': {'cost': 1, 'times': 1}},
-              2: {'up': {'cost': 1, 'times': 1}, 'down': {'cost': 1, 'times': 1}}}
+        pc = {1: {'right': {'cost': 1, 'times': 1}, 'left': {'cost': 1, 'times': 1}},
+              2: {'right': {'cost': 1, 'times': 1}, 'left': {'cost': 1, 'times': 1}}}
         node = PseudoCostBranchNode(small_branch.lp, small_branch.integerIndices)
         node.solution = [0, 1.25, 2.5]
         self.assertTrue(node._best_pseudo_costs_index(pc) == 2)
-        pc[1] = {'up': {'cost': 10, 'times': 1}, 'down': {'cost': 1, 'times': 1}}
+        pc[1] = {'right': {'cost': 10, 'times': 1}, 'left': {'cost': 1, 'times': 1}}
         self.assertTrue(node._best_pseudo_costs_index(pc) == 2)
-        pc[1] = {'up': {'cost': 10, 'times': 1}, 'down': {'cost': 10, 'times': 1}}
+        pc[1] = {'right': {'cost': 10, 'times': 1}, 'left': {'cost': 10, 'times': 1}}
         self.assertTrue(node._best_pseudo_costs_index(pc) == 1)
 
     def test_check_pseudo_costs(self):
@@ -185,33 +185,33 @@ class TestNode(TestModels):
 
         # check good
         self.assertFalse(node._check_pseudo_costs({}), 'empty should be fine')
-        pc = {1: {'up': {'cost': 0, 'times': 0}, 'down': {'cost': 0, 'times': 0}}}
+        pc = {1: {'right': {'cost': 0, 'times': 0}, 'left': {'cost': 0, 'times': 0}}}
         self.assertFalse(node._check_pseudo_costs(pc), 'good dict should be fine')
 
         # check bad times
-        pc[1]['down']['times'] = -1
+        pc[1]['left']['times'] = -1
         err = node._check_pseudo_costs(pc)[0]
-        self.assertTrue(err == 'index 1 direction down times must be nonnegative int',
-                        "check pc[1]['down']['times']")
-        del pc[1]['down']['times']
+        self.assertTrue(err == 'index 1 direction left times must be nonnegative int',
+                        "check pc[1]['left']['times']")
+        del pc[1]['left']['times']
         err = node._check_pseudo_costs(pc)[0]
-        self.assertTrue(err == 'index 1 direction down missing times',
-                        "check pc[1]['down']")
+        self.assertTrue(err == 'index 1 direction left missing times',
+                        "check pc[1]['left']")
 
         # check bad costs
-        pc[1]['down']['cost'] = -1
+        pc[1]['left']['cost'] = -1
         err = node._check_pseudo_costs(pc)[0]
-        self.assertTrue(err == 'index 1 direction down cost must be nonnegative number',
-                        "check pc[1]['down']['cost']")
-        del pc[1]['down']['cost']
+        self.assertTrue(err == 'index 1 direction left cost must be nonnegative number',
+                        "check pc[1]['left']['cost']")
+        del pc[1]['left']['cost']
         err = node._check_pseudo_costs(pc)[0]
-        self.assertTrue(err == 'index 1 direction down missing cost',
-                        "check pc[1]['down']")
+        self.assertTrue(err == 'index 1 direction left missing cost',
+                        "check pc[1]['left']")
 
         # check missing direction
-        del pc[1]['down']
+        del pc[1]['left']
         err = node._check_pseudo_costs(pc)[0]
-        self.assertTrue(err == 'index 1 missing direction down',
+        self.assertTrue(err == 'index 1 missing direction left',
                         "check pc[1]")
 
         # check bad integers
