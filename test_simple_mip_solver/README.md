@@ -45,10 +45,17 @@ solved is infeasible. I use this problem to ensure for a given Node class that
 it has branch and bound do nothing after bounding.
 
 ### unbounded
-to be implemented
+This model is a small MILP with an unbounded root node LP relaxation. I use this
+problem to ensure for a given Node class that it has branch and bound terminate
+after finding an unbounded relaxation. I know this does not necessarily imply that
+the MILP is actually unbounded as we would need to find a MILP feasible solution.
+However, using branch and bound, we could end up infinitely searching for a
+feasible solution that does not exist. Since the purpose of this solver is not
+to analyze MILP's with unbounded solutions in their relaxations, I assume this
+solution good enough.
 
 
-(Note, I can use all of the above three problems to create nodes with monkey-patched
+(Note, I can use all of the above problems to create nodes with monkey-patched
 lower bounds so that we can test branch and bound immediately prunes them.
 After doing such, we have test MILPs for each Node class to ensure its basic,
 proper functionality in branch and bound)

@@ -1,5 +1,6 @@
 from coinor.cuppy.milpInstance import MILPInstance
 from coinor.grumpy.BranchAndBound import GenerateRandomMIP
+from cylp.cy import CyClpSimplex
 from cylp.py.modeling.CyLPModel import CyLPArray
 from itertools import product
 import pandas as pd
@@ -24,11 +25,11 @@ def generate_random_MILPInstance(numVars=40, numCons=20, density=0.2,
 
 
 def generate_random_variety():
-    constraints = {10: 'low', 20: 'high'}
-    variables = {10: 'low', 20: 'high'}
+    constraints = {2: 'low', 4: 'high'}
+    variables = {2: 'low', 4: 'high'}
     densities = {.2: 'low', .8: 'high'}
-    max_obj_coeffs = {10: 'low', 1000: 'high'}
-    max_cons_coeffs = {10: 'low', 1000: 'high'}
+    max_obj_coeffs = {10: 'low', 100: 'high'}
+    max_cons_coeffs = {10: 'low', 100: 'high'}
     tightnesses = {2: 'low', 8: 'high'}
 
     for constraint, variable, density, max_obj_coeff, max_cons_coeff, \
@@ -64,8 +65,9 @@ A = np.matrix([[1, 0, 1],
 b = CyLPArray([1.5, 1.25])
 c = CyLPArray([1, 1, 1])
 l = CyLPArray([0, 0, 0])
+u = CyLPArray([10, 10, 10])
 
-small_branch = MILPInstance(A=A, b=b, c=c, l=l, sense=['Max', '<='],
+small_branch = MILPInstance(A=A, b=b, c=c, l=l, u=u, sense=['Max', '<='],
                             integerIndices=[0, 1, 2], numVars=3)
 
 
@@ -92,6 +94,31 @@ unbounded = MILPInstance(A=A, b=b, c=c, l=l, sense=['Max', '<='],
 # ----------------------- a larger model that is random ----------------------
 random = generate_random_MILPInstance(numVars=20, numCons=10)
 
+# ---------------- a model for testing cutting plane methods -----------------
+A = np.matrix([[-8, 30],
+               [-14, 8],
+               [10, 10]])
+b = CyLPArray([[115],
+               [1],
+               [127]])
+c = CyLPArray([0, 1])
+l = CyLPArray([0, 0])
+
+cut1 = MILPInstance(A=A, b=b, c=c, l=l, sense=['Max', '<='],
+                    integerIndices=[0, 1], numVars=2)
+
+# ---------------- a model for testing cutting plane methods -----------------
+A = np.matrix([[4, 1],
+               [1, 4],
+               [1, -1]])
+b = CyLPArray([[28],
+               [27],
+               [1]])
+c = CyLPArray([2, 5])
+l = CyLPArray([0, 0])
+
+cut2 = MILPInstance(A=A, b=b, c=c, l=l, sense=['Max', '<='],
+                    integerIndices=[0, 1], numVars=2)
 
 if __name__ == '__main__':
     generate_random_variety()
