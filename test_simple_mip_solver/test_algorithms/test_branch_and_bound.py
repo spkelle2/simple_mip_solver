@@ -1,13 +1,32 @@
-from coinor.gimpy.tree import BinaryTree
 from queue import PriorityQueue
 import unittest
 from unittest.mock import patch
 
 from simple_mip_solver import BaseNode, BranchAndBound, \
     PseudoCostBranchDepthFirstSearchNode as PCBDFSNode
+from simple_mip_solver.algorithms.branch_and_bound import BranchAndBoundTree
 from simple_mip_solver.algorithms.utils import Utils
 from test_simple_mip_solver.example_models import no_branch, small_branch,\
     infeasible, unbounded
+
+
+class TestBranchAndBoundTree(unittest.TestCase):
+
+    def test_get_leaves_fails_asserts(self):
+        bb = BranchAndBound(small_branch)
+        bb.solve()
+        self.assertRaisesRegex(AssertionError, "subtree_root_id must belong to the tree",
+                               bb._tree.get_leaves, 20)
+
+    def test_get_leaves(self):
+        bb = BranchAndBound(small_branch)
+        bb.solve()
+        leaves = bb._tree.get_leaves(0)
+        for node_id in bb._tree.nodes:
+            if node_id in leaves:
+                self.assertFalse(bb._tree.get_children(node_id))
+            else:
+                self.assertTrue(len(bb._tree.get_children(node_id)) == 2)
 
 
 class TestBranchAndBound(unittest.TestCase):
@@ -29,7 +48,7 @@ class TestBranchAndBound(unittest.TestCase):
         self.assertFalse(bb.solution)
         self.assertTrue(bb.status == 'unsolved')
         self.assertFalse(bb.objective_value)
-        self.assertTrue(isinstance(bb._tree, BinaryTree))
+        self.assertTrue(isinstance(bb._tree, BranchAndBoundTree))
         self.assertTrue(list(bb._tree.nodes.keys()) == [0])
         self.assertTrue(bb._tree.nodes[0].attr['node'] is bb._root_node)
 

@@ -10,6 +10,22 @@ from test_simple_mip_solver.example_models import small_branch
 
 B = TypeVar('B', bound='BranchAndBound')
 
+BT = TypeVar('BT', bound='BranchAndBoundTree')
+
+
+class BranchAndBoundTree(BinaryTree):
+    """Class used to represent the underlying tree structure of branch and bound"""
+
+    def get_leaves(self: BT, subtree_root_id: int):
+        assert subtree_root_id in self, 'subtree_root_id must belong to the tree'
+        leaves = []
+        if not self.neighbors[subtree_root_id]:
+            leaves.append(subtree_root_id)
+        else:
+            for child_id in self.get_children(subtree_root_id):
+                leaves.extend(self.get_leaves(child_id))
+        return leaves
+
 
 class BranchAndBound(Utils):
     """Class used to solve Mixed Integer Linear Programs with the Branch and
@@ -70,7 +86,7 @@ class BranchAndBound(Utils):
         self._global_upper_bound = float('inf')
         self._global_lower_bound = -float('inf')
         self._node_limit = node_limit
-        self._tree = BinaryTree()
+        self._tree = BranchAndBoundTree()
         self._tree.add_root(self._root_node.idx, node=self._root_node)
 
     def solve(self: B) -> None:
