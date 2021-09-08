@@ -22,7 +22,7 @@ class TestNode(TestModels):
 
     def test_init(self):
         node = BaseNode(small_branch.lp, small_branch.integerIndices)
-        self.assertTrue(node._lp, 'should get a model on proper instantiation')
+        self.assertTrue(node.lp, 'should get a model on proper instantiation')
         self.assertTrue(node._integer_indices == [0, 1, 2], 'should have list of integer indices')
         self.assertTrue(node.idx == 0, 'idx should be 0')
         self.assertTrue(node._var_indices == list(range(3)), 'should have list of var indices')
@@ -149,21 +149,21 @@ class TestNode(TestModels):
         for name, n in rtn.items():
             if name not in ['left', 'right']:
                 continue
-            self.assertTrue(all(n._lp.matrix.elements == node._lp.matrix.elements))
-            self.assertTrue(all(n._lp.objective == node._lp.objective))
-            self.assertTrue(all(n._lp.constraintsLower == node._lp.constraintsLower))
-            self.assertTrue(all(n._lp.constraintsUpper == node._lp.constraintsUpper))
+            self.assertTrue(all(n.lp.matrix.elements == node.lp.matrix.elements))
+            self.assertTrue(all(n.lp.objective == node.lp.objective))
+            self.assertTrue(all(n.lp.constraintsLower == node.lp.constraintsLower))
+            self.assertTrue(all(n.lp.constraintsUpper == node.lp.constraintsUpper))
             if name == 'left':
-                self.assertTrue(all(n._lp.variablesUpper == [10, 10, 1]))
-                self.assertTrue(n._lp.variablesUpper[idx] == 1)
-                self.assertTrue(all(n._lp.variablesLower == node._lp.variablesLower))
+                self.assertTrue(all(n.lp.variablesUpper == [10, 10, 1]))
+                self.assertTrue(n.lp.variablesUpper[idx] == 1)
+                self.assertTrue(all(n.lp.variablesLower == node.lp.variablesLower))
             else:
-                self.assertTrue(all(n._lp.variablesUpper == node._lp.variablesUpper))
-                self.assertTrue(all(n._lp.variablesLower == [0, 0, 2]))
+                self.assertTrue(all(n.lp.variablesUpper == node.lp.variablesUpper))
+                self.assertTrue(all(n.lp.variablesLower == [0, 0, 2]))
             # check basis statuses work - i.e. are warm started
             for i in [0, 1]:
-                self.assertTrue(all(node._lp.getBasisStatus()[i] ==
-                                    n._lp.getBasisStatus()[i]), 'bases should match')
+                self.assertTrue(all(node.lp.getBasisStatus()[i] ==
+                                    n.lp.getBasisStatus()[i]), 'bases should match')
 
         # check other returns
         self.assertTrue(rtn['next_node_idx'] == 3)
@@ -186,9 +186,9 @@ class TestNode(TestModels):
         # test we stay within iters and improve bound/stay same
         rtn = node._strong_branch(idx, iterations=iters)
         for direction, child_node in rtn.items():
-            self.assertTrue(child_node._lp.iteration <= iters)
-            if child_node._lp.getStatusCode() in [0, 3]:
-                self.assertTrue(child_node._lp.objectiveValue >= node.objective_value)
+            self.assertTrue(child_node.lp.iteration <= iters)
+            if child_node.lp.getStatusCode() in [0, 3]:
+                self.assertTrue(child_node.lp.objectiveValue >= node.objective_value)
 
         # test call base_branch
         node = BaseNode(random.lp, random.integerIndices)
@@ -272,7 +272,7 @@ class TestNode(TestModels):
 
     def test_sense_fails_asserts(self):
         node = BaseNode(small_branch.lp, small_branch.integerIndices, 0)
-        node._lp.addConstraint(-CyLPArray([1, 0, 0]) * node._lp.getVarByName('x') >= 1)
+        node.lp.addConstraint(-CyLPArray([1, 0, 0]) * node.lp.getVarByName('x') >= 1)
         with self.assertRaises(AssertionError):
             node._sense
 
@@ -289,9 +289,9 @@ class TestNode(TestModels):
         node = BaseNode(small_branch.lp, small_branch.integerIndices, 0)
         self.assertTrue(node._variables_nonnegative)
         node = BaseNode(cut2.lp, cut2.integerIndices, 0)
-        l = node._lp.variablesLower.copy()
+        l = node.lp.variablesLower.copy()
         l[0] = -10
-        node._lp.variablesLower = l
+        node.lp.variablesLower = l
         self.assertFalse(node._variables_nonnegative)
 
     def test_models(self):

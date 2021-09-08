@@ -50,7 +50,7 @@ class BaseNode:
         assert isinstance(depth, int) and depth >= 0, 'depth is a positive integer'
 
         lp.logLevel = 0
-        self._lp = lp
+        self.lp = lp
         self._integer_indices = integer_indices
         self.idx = idx
         self._var_indices = list(range(lp.nVariables))
@@ -83,12 +83,12 @@ class BaseNode:
         # primal infeasibility for dual simplex via its first phase. In later nodes,
         # dual infeasibility is not possible since we start with dual feasible
         # solution
-        self._lp.dual(startFinishOptions='x')
-        self.lp_feasible = self._lp.getStatusCode() in [0, 2]  # optimal or dual infeasible
-        self.unbounded = self._lp.getStatusCode() == 2
-        self.objective_value = self._lp.objectiveValue if self.lp_feasible else float('inf')
+        self.lp.dual(startFinishOptions='x')
+        self.lp_feasible = self.lp.getStatusCode() in [0, 2]  # optimal or dual infeasible
+        self.unbounded = self.lp.getStatusCode() == 2
+        self.objective_value = self.lp.objectiveValue if self.lp_feasible else float('inf')
         # first cyclpsimplex has variables keyed, rest are list
-        sol = self._lp.primalVariableSolution
+        sol = self.lp.primalVariableSolution
         self.solution = None if not self.lp_feasible else sol['x'] if \
             type(sol) == dict else sol
         int_var_vals = None if not self.lp_feasible else self.solution[self._integer_indices]
@@ -119,22 +119,22 @@ class BaseNode:
 
         # get end basis to warm start the children
         # appears to be tuple  (variable statuses, slack statuses)
-        basis = self._lp.getBasisStatus()
+        basis = self.lp.getBasisStatus()
 
         # create new lp's for each direction
         children = {'right': CyClpSimplex(), 'left': CyClpSimplex()}
         for direction, lp in children.items():
-            x = lp.addVariable('x', self._lp.nCols)
-            l = CyLPArray(self._lp.variablesLower.copy())
-            u = CyLPArray(self._lp.variablesUpper.copy())
+            x = lp.addVariable('x', self.lp.nCols)
+            l = CyLPArray(self.lp.variablesLower.copy())
+            u = CyLPArray(self.lp.variablesUpper.copy())
             if direction == 'left':
                 u[branch_idx] = floor(b_val)
             else:
                 l[branch_idx] = ceil(b_val)
             lp += l <= x <= u
-            lp += CyLPArray(self._lp.constraintsLower.copy()) <= self._lp.coefMatrix * x \
-                <= CyLPArray(self._lp.constraintsUpper.copy())
-            lp.objective = self._lp.objective
+            lp += CyLPArray(self.lp.constraintsLower.copy()) <= self.lp.coefMatrix * x \
+                  <= CyLPArray(self.lp.constraintsUpper.copy())
+            lp.objective = self.lp.objective
             lp.setBasisStatus(*basis)  # warm start
 
         # return instances of the subclass that calls this function
@@ -161,8 +161,8 @@ class BaseNode:
             'iterations must be positive integer'
         nodes = {k: v for k, v in self._base_branch(idx).items() if k in ['left', 'right']}
         for n in nodes.values():
-            n._lp.maxNumIteration = iterations
-            n._lp.dual(startFinishOptions='x')
+            n.lp.maxNumIteration = iterations
+            n.lp.dual(startFinishOptions='x')
         return nodes
 
     def _is_fractional(self: T, value: Union[int, float]) -> bool:
@@ -233,9 +233,9 @@ class BaseNode:
 
     @property
     def _sense(self: T):
-        inf = self._lp.getCoinInfinity()
-        lower_bounded = self._lp.constraintsLower.max() > -inf
-        upper_bounded = self._lp.constraintsUpper.min() < inf
+        inf = self.lp.getCoinInfinity()
+        lower_bounded = self.lp.constraintsLower.max() > -inf
+        upper_bounded = self.lp.constraintsUpper.min() < inf
         assert not (lower_bounded and upper_bounded),\
             "all constraints should be bounded same way"
         return '<=' if upper_bounded else '>='
@@ -246,4 +246,4 @@ class BaseNode:
 
         :return:
         """
-        return (self._lp.variablesLower >= 0).all()
+        return (self.lp.variablesLower >= 0).all()

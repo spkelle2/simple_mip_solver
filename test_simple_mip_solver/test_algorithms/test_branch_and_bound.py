@@ -1,3 +1,6 @@
+from cylp.cy.CyClpSimplex import CyClpSimplex, CyLPArray
+from math import isclose
+import numpy as np
 from queue import PriorityQueue
 import unittest
 from unittest.mock import patch
@@ -6,8 +9,8 @@ from simple_mip_solver import BaseNode, BranchAndBound, \
     PseudoCostBranchDepthFirstSearchNode as PCBDFSNode
 from simple_mip_solver.algorithms.branch_and_bound import BranchAndBoundTree
 from simple_mip_solver.algorithms.utils import Utils
-from test_simple_mip_solver.example_models import no_branch, small_branch,\
-    infeasible, unbounded
+from test_simple_mip_solver.example_models import no_branch, small_branch, infeasible, \
+    unbounded, infeasible2, h3p1, h3p1_0, h3p1_1, h3p1_2, h3p1_3, h3p1_4, h3p1_5
 
 
 class TestBranchAndBoundTree(unittest.TestCase):
@@ -27,6 +30,36 @@ class TestBranchAndBoundTree(unittest.TestCase):
                 self.assertFalse(bb._tree.get_children(node_id))
             else:
                 self.assertTrue(len(bb._tree.get_children(node_id)) == 2)
+
+    def test_get_ancestors_fails_asserts(self):
+        bb = BranchAndBound(small_branch)
+        bb.solve()
+        self.assertRaisesRegex(AssertionError, "node_id must belong to the tree",
+                               bb._tree.get_ancestors, 20)
+
+    def test_get_ancestors(self):
+        bb = BranchAndBound(small_branch)
+        bb.solve()
+        self.assertTrue(bb._tree.get_ancestors(12) == [9, 7, 4, 1, 0])
+
+    def test_get_node_instances_fails_asserts(self):
+        bb = BranchAndBound(small_branch)
+        bb.solve()
+        self.assertRaisesRegex(AssertionError, 'must be a list', bb._tree.get_node_instances, 1)
+        self.assertRaisesRegex(AssertionError, 'node_ids are not in the tree',
+                               bb._tree.get_node_instances, [20])
+        del bb._tree.nodes[0].attr['node']
+        self.assertRaisesRegex(AssertionError, 'must have an attribute for a node instance',
+                               bb._tree.get_node_instances, [0])
+
+    def test_get_node_instances(self):
+        bb = BranchAndBound(small_branch)
+        bb.solve()
+        node1, node2 = bb._tree.get_node_instances([1, 2])
+        self.assertTrue(node1.idx == 1, 'we should get node with matching id')
+        self.assertTrue(isinstance(node1, BaseNode), 'we should get a node')
+        self.assertTrue(node2.idx == 2, 'we should get node with matching id')
+        self.assertTrue(isinstance(node2, BaseNode), 'we should get a node')
 
 
 class TestBranchAndBound(unittest.TestCase):
@@ -250,6 +283,101 @@ class TestBranchAndBound(unittest.TestCase):
             self.assertTrue(pr.call_count == 1, 'should call process rtn')
             self.assertTrue(alc.call_count == 1, 'should call add left child')
             self.assertTrue(arc.call_count == 1, 'should call add right child')
+
+    def test_dual_bound_fails_asserts(self):
+        pass
+
+    def test_dual_bound(self):
+        """ Ensure that BranchAndBound.dual_bound generates the dual function
+        that we saw in ISE 418 HW 3 problem 1
+
+        todo: patch function calls and test that just the functions are called when expected
+
+        :return:
+        """
+        bb = BranchAndBound(h3p1)
+        bb.solve()
+        bound = bb.dual_bound(CyLPArray([3.5, -3.5]))
+        self.assertTrue(bb.objective_value == bound, 'dual should be strong at original rhs')
+
+        prob = {0: h3p1_0, 1: h3p1_1, 2: h3p1_2, 3: h3p1_3, 4: h3p1_4, 5: h3p1_5}
+        sol_new = {0: 0, 1: 1, 2: 1, 3: 2, 4: 2, 5: 3}
+        sol_bound = {0: 0, 1: .5, 2: 1, 3: 2, 4: 2, 5: 2.5}
+        for beta in range(6):
+            new_bb = BranchAndBound(prob[beta])
+            new_bb.solve()
+            bound = bb.dual_bound(CyLPArray(np.array([beta, -beta])))
+            self.assertTrue(isclose(sol_new[beta], new_bb.objective_value, abs_tol=.01),
+                            'new branch and bound objective should match expected')
+            self.assertTrue(isclose(sol_bound[beta], bound),
+                            'new dual bound value should match expected')
+            self.assertTrue(bound <= new_bb.objective_value + .01,
+                            'dual bound value should be at most the value function for this rhs')
+
+    def test_calculate_dual_bounds_fails_asserts(self):
+        pass
+
+    def test_calculate_dual_bounds(self):
+        pass
+
+    def test_bound_dual(self):
+        bb = BranchAndBound(infeasible2)
+        bb._root_node.lp += np.matrix([[0, -1, -1]]) * bb._root_node.lp.getVarByName('x') >= CyLPArray([-2.5])
+        bb.solve()
+        terminal_nodes = bb._tree.get_node_instances(bb._tree.get_leaves(0))
+        infeasible_nodes = [n for n in terminal_nodes if n.lp_feasible is False]
+        n = infeasible_nodes[0]
+        lp = bb._bound_dual(n.lp)
+
+        # test that we get a CyClpSimplex object back
+        self.assertTrue(isinstance(lp, CyClpSimplex), 'should return CyClpSimplex instance')
+
+        # same variables plus extra 's'
+        self.assertTrue({v.name for v in lp.variables} == {'x', 's_0', 's_1'},
+                        'x should already exist and s_1 and s_2 should be added')
+        old_x = n.lp.getVarByName('x')
+        new_x, s_0, s_1 = lp.getVarByName('x'), lp.getVarByName('s_0'), lp.getVarByName('s_1')
+
+        # same variable bounds, plus s >= 0
+        self.assertTrue(all(new_x.lower == old_x.lower) and all(new_x.upper == old_x.upper),
+                        'x should have the same bounds')
+        self.assertTrue(all(s_0.lower == [0, 0]) and all(s_0.upper > [1e300, 1e300]), 's_0 >= 0')
+        self.assertTrue(all(s_1.lower == [0]) and all(s_1.upper > 1e300), 's_1 >= 0')
+
+        # same constraints, plus slack s
+        self.assertTrue(lp.nConstraints == 3, 'should have same number of constraints')
+        self.assertTrue((lp.constraints[0].varCoefs[new_x] == np.array([[-1, -1, 0], [0, 0, -1]])).all(),
+                        'x coefs should stay same')
+        self.assertTrue((lp.constraints[0].varCoefs[s_0] == np.matrix(np.identity(2))).all(),
+                        's_0 should have coef of 2-D identity')
+        self.assertTrue(all(lp.constraints[1].varCoefs[new_x] == np.array([0, -1, -1])),
+                        'x coefs should stay same')
+        self.assertTrue(lp.constraints[1].varCoefs[s_1] == np.matrix(np.identity(1)),
+                        's_0 should have coef of 1-D identity')
+        self.assertTrue(all(lp.constraints[0].lower == np.array([1, -1])) and
+                        all(lp.constraints[0].upper >= np.array([1e300])),
+                        'constraint bounds should remain same')
+        self.assertTrue(lp.constraints[1].lower == np.array([-2.5]) and
+                        lp.constraints[1].upper >= np.array([1e300]),
+                        'constraint bounds should remain same')
+
+        # same objective, plus large s coefficient
+        self.assertTrue(all(lp.objective == np.array([-1, -1, 0, bb._M, bb._M, bb._M])))
+
+        # problem is now feasible
+        self.assertTrue(lp.getStatusCode() == 0, 'lp should now be optimal')
+
+    def test_bound_dual_fails_asserts(self):
+        bb = BranchAndBound(infeasible)
+        bb.solve()
+        terminal_nodes = bb._tree.get_node_instances(bb._tree.get_leaves(0))
+        infeasible_nodes = [n for n in terminal_nodes if n.lp_feasible is False]
+        n = infeasible_nodes[0]
+        n.lp.addVariable('s_0', 1)
+        self.assertRaisesRegex(AssertionError, "variable 's_0' is a reserved name",
+                               bb._bound_dual, n.lp)
+        self.assertRaisesRegex(AssertionError, "must give CyClpSimplex instance",
+                               bb._bound_dual, n)
 
 
 if __name__ == '__main__':

@@ -70,7 +70,6 @@ u = CyLPArray([10, 10, 10])
 small_branch = MILPInstance(A=A, b=b, c=c, l=l, u=u, sense=['Max', '<='],
                             integerIndices=[0, 1, 2], numVars=3)
 
-
 # ------------------------ a model that is infeasible ------------------------
 A = np.matrix([[1, 1, 0]])
 b = CyLPArray([-1])
@@ -79,6 +78,16 @@ l = CyLPArray([0, 0, 0])
 
 infeasible = MILPInstance(A=A, b=b, c=c, l=l, sense=['Max', '<='],
                           integerIndices=[0, 1], numVars=3)
+
+# --------------------- another model that is infeasible ---------------------
+A = np.matrix([[1, 1, 0],
+               [0, 0, 1]])
+b = CyLPArray([-1, 1])
+c = CyLPArray([1, 1, 0])
+l = CyLPArray([0, 0, 0])
+
+infeasible2 = MILPInstance(A=A, b=b, c=c, l=l, sense=['Max', '<='],
+                           integerIndices=[0, 1], numVars=3)
 
 # ------------------------ a model that is unbounded -------------------------
 A = np.matrix([[1, -1],
@@ -119,6 +128,83 @@ l = CyLPArray([0, 0])
 
 cut2 = MILPInstance(A=A, b=b, c=c, l=l, sense=['Max', '<='],
                     integerIndices=[0, 1], numVars=2)
+
+# --------- instance from ISE 418 HW 3 problem 1 to test dual bound ----------
+A = np.matrix([[2, 5, -2, -2, 5, 5],
+               [-2, -5, 2, 2, -5, -5]])
+b = CyLPArray([[3.5],
+               [-3.5]])
+c = CyLPArray([1, 4, 6, 4, 5, 7])
+l = CyLPArray([0, 0, 0, 0, 0, 0])
+
+h3p1 = MILPInstance(A=A, b=b, c=c, l=l, sense=['Min', '>='],
+                    integerIndices=[0, 1, 3], numVars=6)
+
+# ------ instance from ISE 418 HW 3 problem 1 to create value function -------
+A = np.matrix([[2, 5, -2, -2, 5, 5],
+               [-2, -5, 2, 2, -5, -5]])
+b = CyLPArray([[0],
+               [0]])
+c = CyLPArray([1, 4, 6, 4, 5, 7])
+l = CyLPArray([0, 0, 0, 0, 0, 0])
+
+h3p1_0 = MILPInstance(A=A, b=b, c=c, l=l, sense=['Min', '>='],
+                      integerIndices=[0, 1, 3], numVars=6)
+
+# ------ instance from ISE 418 HW 3 problem 1 to create value function -------
+A = np.matrix([[2, 5, -2, -2, 5, 5],
+               [-2, -5, 2, 2, -5, -5]])
+b = CyLPArray([[1],
+               [-1]])
+c = CyLPArray([1, 4, 6, 4, 5, 7])
+l = CyLPArray([0, 0, 0, 0, 0, 0])
+
+h3p1_1 = MILPInstance(A=A, b=b, c=c, l=l, sense=['Min', '>='],
+                      integerIndices=[0, 1, 3], numVars=6)
+
+# ------ instance from ISE 418 HW 3 problem 1 to create value function -------
+A = np.matrix([[2, 5, -2, -2, 5, 5],
+               [-2, -5, 2, 2, -5, -5]])
+b = CyLPArray([[2],
+               [-2]])
+c = CyLPArray([1, 4, 6, 4, 5, 7])
+l = CyLPArray([0, 0, 0, 0, 0, 0])
+
+h3p1_2 = MILPInstance(A=A, b=b, c=c, l=l, sense=['Min', '>='],
+                      integerIndices=[0, 1, 3], numVars=6)
+
+# ------ instance from ISE 418 HW 3 problem 1 to create value function -------
+A = np.matrix([[2, 5, -2, -2, 5, 5],
+               [-2, -5, 2, 2, -5, -5]])
+b = CyLPArray([[3],
+               [-3]])
+c = CyLPArray([1, 4, 6, 4, 5, 7])
+l = CyLPArray([0, 0, 0, 0, 0, 0])
+
+h3p1_3 = MILPInstance(A=A, b=b, c=c, l=l, sense=['Min', '>='],
+                      integerIndices=[0, 1, 3], numVars=6)
+
+# ------ instance from ISE 418 HW 3 problem 1 to create value function -------
+A = np.matrix([[2, 5, -2, -2, 5, 5],
+               [-2, -5, 2, 2, -5, -5]])
+b = CyLPArray([[4],
+               [-4]])
+c = CyLPArray([1, 4, 6, 4, 5, 7])
+l = CyLPArray([0, 0, 0, 0, 0, 0])
+
+h3p1_4 = MILPInstance(A=A, b=b, c=c, l=l, sense=['Min', '>='],
+                      integerIndices=[0, 1, 3], numVars=6)
+
+# ------ instance from ISE 418 HW 3 problem 1 to create value function -------
+A = np.matrix([[2, 5, -2, -2, 5, 5],
+               [-2, -5, 2, 2, -5, -5]])
+b = CyLPArray([[5],
+               [-5]])
+c = CyLPArray([1, 4, 6, 4, 5, 7])
+l = CyLPArray([0, 0, 0, 0, 0, 0])
+
+h3p1_5 = MILPInstance(A=A, b=b, c=c, l=l, sense=['Min', '>='],
+                      integerIndices=[0, 1, 3], numVars=6)
 
 if __name__ == '__main__':
     generate_random_variety()

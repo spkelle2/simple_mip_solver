@@ -51,8 +51,8 @@ class CuttingPlaneBoundNode(BaseNode):
         for pi, pi0 in self._find_gomory_cuts():
             # max gives most restrictive lower bound, which we want b/c >= constraints
             pi0 = max(self._optimize_cut(pi, **kwargs), pi0)
-            cut = pi * self._lp.getVarByName('x') >= pi0
-            self._lp.addConstraint(cut)
+            cut = pi * self.lp.getVarByName('x') >= pi0
+            self.lp.addConstraint(cut)
 
     def _find_gomory_cuts(self: G) -> List[Tuple[np.ndarray, float]]:
         """Find Gomory Mixed Integer Cuts (GMICs) for this node's solution.
@@ -67,15 +67,15 @@ class CuttingPlaneBoundNode(BaseNode):
         """
         cuts = []
         for row_idx in self._row_indices:
-            basic_idx = self._lp.basicVariables[row_idx]
+            basic_idx = self.lp.basicVariables[row_idx]
             if basic_idx in self._integer_indices and \
                     self._is_fractional(self.solution[basic_idx]):
                 f0 = self._get_fraction(self.solution[basic_idx])
                 # 0 for basic variables avoids getting small numbers that should be zero
-                f = {i: 0 if i in self._lp.basicVariables else
-                     self._get_fraction(self._lp.tableau[row_idx, i]) for i in
+                f = {i: 0 if i in self.lp.basicVariables else
+                     self._get_fraction(self.lp.tableau[row_idx, i]) for i in
                      self._var_indices}
-                a = {i: 0 if i in self._lp.basicVariables else self._lp.tableau[row_idx, i]
+                a = {i: 0 if i in self.lp.basicVariables else self.lp.tableau[row_idx, i]
                      for i in self._var_indices}
                 # primary variable coefficients in GMI cut
                 pi = CyLPArray(
@@ -85,12 +85,12 @@ class CuttingPlaneBoundNode(BaseNode):
                 )
                 # slack variable coefficients in GMI cut
                 pi_slacks = np.array([x/f0 if x > 0 else -x/(1 - f0) for x in
-                                      self._lp.tableau[row_idx, self._lp.nVariables:]])
+                                      self.lp.tableau[row_idx, self.lp.nVariables:]])
                 # sub out slack variables for primary variables. Ax >= b =>'s
                 # Ax - s = b => s = Ax - b. gomory is pi^T * x + pi_s^T * s >= 1, thus
                 # pi^T * x + pi_s^T * (Ax - b) >= 1 => (pi + A^T * pi_s)^T * x >= 1 + pi_s^T * b
-                pi += self._lp.coefMatrix.T * pi_slacks
-                pi0 = 1 + np.dot(pi_slacks, self._lp.constraintsLower)
+                pi += self.lp.coefMatrix.T * pi_slacks
+                pi0 = 1 + np.dot(pi_slacks, self.lp.constraintsLower)
                 # append pi >= pi0
                 cuts.append((pi, pi0))
         return cuts
@@ -106,11 +106,11 @@ class CuttingPlaneBoundNode(BaseNode):
         :param kwargs: catch all for unused passed kwargs
         :return: the objective value of the best milp feasible solution found
         """
-        A = self._lp.coefMatrix.toarray()
+        A = self.lp.coefMatrix.toarray()
         assert A.shape[1] == pi.shape[0], 'number of columns of A and length of c should match'
 
         # make new model where we minimize the cut
-        model = MILPInstance(A=A, b=self._lp.constraintsLower.copy(), c=pi,
+        model = MILPInstance(A=A, b=self.lp.constraintsLower.copy(), c=pi,
                              sense=['Min', '>='], integerIndices=self._integer_indices,
                              numVars=pi.shape[0])
 

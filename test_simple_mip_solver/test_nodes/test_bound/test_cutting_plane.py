@@ -80,7 +80,7 @@ class TestNode(TestModels):
             node._add_optimized_gomory_cuts()
             self.assertTrue(fgb.called)
             self.assertTrue(oc.call_count == 2)
-            self.assertTrue(len(node._lp.constraints) == 3)
+            self.assertTrue(len(node.lp.constraints) == 3)
 
         # check returns
         rtn = super(CuttingPlaneBoundNode, node).bound()

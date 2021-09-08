@@ -82,10 +82,10 @@ class PseudoCostBranchNode(BaseNode):
         self.pseudo_costs[idx] = self.pseudo_costs.get(idx, {})
         self.pseudo_costs[idx][direction] = self.pseudo_costs[idx].get(
             direction, {'cost': 0, 'times': 0})
-        if node._lp.getStatusCode() in [0, 3]:  # optimal or hit max iters
-            bound_change = node._lp.objectiveValue - node.lower_bound
-            variable_change = node._b_val - node._lp.variablesUpper[idx] if \
-                direction == 'left' else node._lp.variablesLower[idx] - node._b_val
+        if node.lp.getStatusCode() in [0, 3]:  # optimal or hit max iters
+            bound_change = node.lp.objectiveValue - node.lower_bound
+            variable_change = node._b_val - node.lp.variablesUpper[idx] if \
+                direction == 'left' else node.lp.variablesLower[idx] - node._b_val
             cost = self.pseudo_costs[idx][direction]['cost']
             times = self.pseudo_costs[idx][direction]['times']
             self.pseudo_costs[idx][direction]['cost'] = (cost * times + bound_change /

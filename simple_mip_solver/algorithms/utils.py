@@ -12,6 +12,7 @@ class Utils:
     def __init__(self: U, model: MILPInstance, Node: Any, node_attributes: List[str],
                  node_funcs: List[str], **kwargs: Any):
         # model asserts
+        self._swapped_constraint_direction = False
         assert isinstance(model, MILPInstance), 'model must be cuppy MILPInstance'
         model = self._convert_constraints_to_greq(model)
 
@@ -36,9 +37,9 @@ class Utils:
         self._evaluated_nodes = 0
         kwargs['next_node_idx'] = 1  # put in kwargs so node methods can update this number
         self._kwargs = kwargs
+        self._M = 999999999
 
-    @staticmethod
-    def _convert_constraints_to_greq(model: MILPInstance) -> MILPInstance:
+    def _convert_constraints_to_greq(self: U, model: MILPInstance) -> MILPInstance:
         """ If constraints are of the form A <= b, convert them to A >= b
 
         :param model:
@@ -48,6 +49,7 @@ class Utils:
             # all problems converted to minimization via lp.objective in MILPInstance init
             if isinstance(model.A, csc_matrixPlus):
                 model.A = model.A.toarray()
+            self._swapped_constraint_direction = True
             return MILPInstance(A=-model.A, b=-model.b, c=model.lp.objective,
                                 l=model.l, u=model.u, integerIndices=model.integerIndices,
                                 sense=['Min', '>='], numVars=len(model.c))
