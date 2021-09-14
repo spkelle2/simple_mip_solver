@@ -15,7 +15,7 @@ class BaseNode:
     best-first search and most fractional branching.
     """
 
-    def __init__(self: T, lp: CyClpSimplex, integer_indices: List[int],
+    def __init__(self: T, lp: CyClpSimplex, integer_indices: List[int], idx: int = 0,
                  lower_bound: Union[float, int] = -float('inf'), b_idx: int = None,
                  b_dir: str = None, b_val: float = None, depth=0):
         """
@@ -31,6 +31,7 @@ class BaseNode:
         assert isinstance(lp, CyClpSimplex), 'lp must be CyClpSimplex instance'
         assert all(0 <= idx < lp.nVariables and isinstance(idx, int) for idx in
                    integer_indices), 'indices must match variables'
+        assert isinstance(idx, int), 'node idx must be integer'
         assert len(set(integer_indices)) == len(integer_indices), \
             'indices must be distinct'
         assert isinstance(lower_bound, float) or isinstance(lower_bound, int), \
@@ -39,18 +40,19 @@ class BaseNode:
             'none are none or all are none'
         assert b_idx in integer_indices or b_idx is None, \
             'branch index corresponds to integer variable if it exists'
-        assert b_dir in ['up', 'down'] or b_dir is None, \
-            'we can only round a variable up or down when branching'
+        assert b_dir in ['right', 'left'] or b_dir is None, \
+            'we can only branch right or left'
         if b_val is not None:
-            good_down = 0 < b_val - lp.variablesUpper[b_idx] < 1
-            good_up = 0 < lp.variablesLower[b_idx] - b_val < 1
-            assert (b_dir == 'down' and good_down) or \
-                   (b_dir == 'up' and good_up), 'branch val should be within 1 of both bounds'
+            good_left = 0 < b_val - lp.variablesUpper[b_idx] < 1
+            good_right = 0 < lp.variablesLower[b_idx] - b_val < 1
+            assert (b_dir == 'left' and good_left) or \
+                   (b_dir == 'right' and good_right), 'branch val should be within 1 of both bounds'
         assert isinstance(depth, int) and depth >= 0, 'depth is a positive integer'
 
         lp.logLevel = 0
-        self._lp = lp
+        self.lp = lp
         self._integer_indices = integer_indices
+        self.idx = idx
         self._var_indices = list(range(lp.nVariables))
         self._row_indices = list(range(lp.nConstraints))
         self.lower_bound = lower_bound
@@ -81,64 +83,68 @@ class BaseNode:
         # primal infeasibility for dual simplex via its first phase. In later nodes,
         # dual infeasibility is not possible since we start with dual feasible
         # solution
-        self._lp.dual(startFinishOptions='x')
-        self.lp_feasible = self._lp.getStatusCode() in [0, 2]  # optimal or dual infeasible
-        self.unbounded = self._lp.getStatusCode() == 2
-        self.objective_value = self._lp.objectiveValue if self.lp_feasible else float('inf')
+        self.lp.dual(startFinishOptions='x')
+        self.lp_feasible = self.lp.getStatusCode() in [0, 2]  # optimal or dual infeasible
+        self.unbounded = self.lp.getStatusCode() == 2
+        self.objective_value = self.lp.objectiveValue if self.lp_feasible else float('inf')
         # first cyclpsimplex has variables keyed, rest are list
-        sol = self._lp.primalVariableSolution
+        sol = self.lp.primalVariableSolution
         self.solution = None if not self.lp_feasible else sol['x'] if \
             type(sol) == dict else sol
         int_var_vals = None if not self.lp_feasible else self.solution[self._integer_indices]
         self.mip_feasible = self.lp_feasible and \
             np.max(np.abs(np.round(int_var_vals) - int_var_vals)) < self._epsilon
 
-    def bound(self: T, **kwargs: Any) -> Dict[Any, Any]:
+    def bound(self: T, **kwargs: Any) -> Dict[str, Any]:
         self._base_bound()
         return {}
 
-    def _base_branch(self: T, idx: int) -> Dict[str, T]:
+    def _base_branch(self: T, branch_idx: int, next_node_idx: int = 1,
+                     **kwargs: Any) -> Dict[str, T]:
         """ Creates two new copies of the node with new bounds placed on the variable
         with index <idx>, one with the variable's lower bound set to the ceiling
         of its current value and another with the variable's upper bound set to
         the floor of its current value.
 
-        :param idx: index of variable to branch on
+        :param branch_idx: index of variable to branch on
+        :param next_node_idx: index that should be assigned to the next node created
 
         :return: dict of Nodes with the new bounds keyed by direction they branched
         """
+        assert isinstance(next_node_idx, int), 'next node index should be integer'
         assert self.lp_feasible, 'must solve before branching'
-        assert idx in self._integer_indices, 'must branch on integer index'
-        b_val = self.solution[idx]
+        assert branch_idx in self._integer_indices, 'must branch on integer index'
+        b_val = self.solution[branch_idx]
         assert self._is_fractional(b_val), "index branched on must be fractional"
 
         # get end basis to warm start the children
         # appears to be tuple  (variable statuses, slack statuses)
-        basis = self._lp.getBasisStatus()
+        basis = self.lp.getBasisStatus()
 
         # create new lp's for each direction
-        children = {'up': CyClpSimplex(), 'down': CyClpSimplex()}
+        children = {'right': CyClpSimplex(), 'left': CyClpSimplex()}
         for direction, lp in children.items():
-            x = lp.addVariable('x', self._lp.nCols)
-            l = CyLPArray(self._lp.variablesLower.copy())
-            u = CyLPArray(self._lp.variablesUpper.copy())
-            if direction == 'down':
-                u[idx] = floor(b_val)
+            x = lp.addVariable('x', self.lp.nCols)
+            l = CyLPArray(self.lp.variablesLower.copy())
+            u = CyLPArray(self.lp.variablesUpper.copy())
+            if direction == 'left':
+                u[branch_idx] = floor(b_val)
             else:
-                l[idx] = ceil(b_val)
+                l[branch_idx] = ceil(b_val)
             lp += l <= x <= u
-            lp += CyLPArray(self._lp.constraintsLower.copy()) <= self._lp.coefMatrix * x \
-                <= CyLPArray(self._lp.constraintsUpper.copy())
-            lp.objective = self._lp.objective
+            lp += CyLPArray(self.lp.constraintsLower.copy()) <= self.lp.coefMatrix * x \
+                  <= CyLPArray(self.lp.constraintsUpper.copy())
+            lp.objective = self.lp.objective
             lp.setBasisStatus(*basis)  # warm start
 
         # return instances of the subclass that calls this function
-        return {'down': type(self)(children['down'], self._integer_indices,
-                                   self.objective_value, idx, 'down', b_val,
+        return {'left': type(self)(children['left'], self._integer_indices, next_node_idx,
+                                   self.objective_value, branch_idx, 'left', b_val,
                                    self.depth + 1),
-                'up': type(self)(children['up'], self._integer_indices,
-                                 self.objective_value, idx, 'up', b_val,
-                                 self.depth + 1)}
+                'right': type(self)(children['right'], self._integer_indices, next_node_idx + 1,
+                                    self.objective_value, branch_idx, 'right', b_val,
+                                    self.depth + 1),
+                'next_node_idx': next_node_idx + 2}
 
     def _strong_branch(self: T, idx: int, iterations: int = 5) -> Dict[str, T]:
         """ Run <iterations> iterations of dual simplex starting from the
@@ -148,15 +154,15 @@ class BaseNode:
         :param idx: which index to branch on
         :param iterations: how many iterations of dual simplex to perform
         :return: dict of nodes with attributes showing changes in bounds for
-        feasible branches. Looks like: {'down': <node from branching down>,
-        'up': <node from branching up>}
+        feasible branches. Looks like: {'left': <node from branching down/left>,
+        'right': <node from branching up/right>}
         """
         assert isinstance(iterations, int) and iterations > 0, \
             'iterations must be positive integer'
-        nodes = self._base_branch(idx)
+        nodes = {k: v for k, v in self._base_branch(idx).items() if k in ['left', 'right']}
         for n in nodes.values():
-            n._lp.maxNumIteration = iterations
-            n._lp.dual(startFinishOptions='x')
+            n.lp.maxNumIteration = iterations
+            n.lp.dual(startFinishOptions='x')
         return nodes
 
     def _is_fractional(self: T, value: Union[int, float]) -> bool:
@@ -180,7 +186,7 @@ class BaseNode:
 
     # implementation of most fractional branch
     @property
-    def _most_fractional_index(self) -> int:
+    def _most_fractional_index(self: T) -> int:
         """ Returns the index of the integer variable with current value furthest from
         being integer. If one does not exist or the problem has not yet been solved,
         returns None.
@@ -199,7 +205,7 @@ class BaseNode:
                     furthest_index = idx
         return furthest_index
 
-    def branch(self, **kwargs: Any) -> Dict[str, T]:
+    def branch(self: T, **kwargs: Any) -> Dict[str, T]:
         """ Creates two new nodes which are branched on the most fractional index
         of this node's LP relaxation solution
 
@@ -207,11 +213,11 @@ class BaseNode:
         branch and bound method
         :return: list of Nodes with the new bounds
         """
-        idx = self._most_fractional_index
-        return self._base_branch(idx)
+        branch_idx = self._most_fractional_index
+        return self._base_branch(branch_idx, **kwargs)
 
     # implementation of best first search
-    def __eq__(self, other):
+    def __eq__(self: T, other):
         if isinstance(other, BaseNode):
             return self.lower_bound == other.lower_bound
         else:
@@ -219,25 +225,25 @@ class BaseNode:
 
     # self < other means self gets better priority in priority queue
     # want priority to go to node with lowest lower_bound
-    def __lt__(self, other):
+    def __lt__(self: T, other):
         if isinstance(other, BaseNode):
             return self.lower_bound < other.lower_bound
         else:
             raise TypeError('A Node can only be compared with another Node')
 
     @property
-    def _sense(self):
-        inf = self._lp.getCoinInfinity()
-        lower_bounded = self._lp.constraintsLower.max() > -inf
-        upper_bounded = self._lp.constraintsUpper.min() < inf
+    def _sense(self: T):
+        inf = self.lp.getCoinInfinity()
+        lower_bounded = self.lp.constraintsLower.max() > -inf
+        upper_bounded = self.lp.constraintsUpper.min() < inf
         assert not (lower_bounded and upper_bounded),\
             "all constraints should be bounded same way"
         return '<=' if upper_bounded else '>='
 
     @property
-    def _variables_nonnegative(self):
+    def _variables_nonnegative(self: T):
         """ Determines if all variables in the lp model are bound to be nonnegative
 
         :return:
         """
-        return (self._lp.variablesLower >= 0).all()
+        return (self.lp.variablesLower >= 0).all()

@@ -1,10 +1,8 @@
 from coinor.cuppy.milpInstance import MILPInstance
-from cylp.py.modeling.CyLPModel import CyLPArray
 
 from math import isclose
 import numpy as np
 import unittest
-from unittest.mock import patch
 
 from simple_mip_solver import CuttingPlane
 from simple_mip_solver.algorithms.utils import Utils
@@ -42,3 +40,6 @@ class TestNode(unittest.TestCase):
         self.assertTrue(np.max(np.abs(cp.solution - np.array([7, 5]))) < cp._root_node._epsilon)
         self.assertTrue(isclose(cp.objective_value, -5, abs_tol=.01))
 
+
+if __name__ == '__main__':
+    unittest.main()

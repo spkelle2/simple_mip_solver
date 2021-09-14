@@ -39,7 +39,7 @@ class PseudoCostBranchNode(BaseNode):
         self._base_bound()
         if self.lp_feasible:
             self._update_pseudo_costs()
-        return {'_pseudo_costs': self.pseudo_costs}
+        return {'pseudo_costs': self.pseudo_costs}
 
     def _update_pseudo_costs(self: T) -> None:
         """ Update the pseudo costs for the variable branched on in the current
@@ -82,10 +82,10 @@ class PseudoCostBranchNode(BaseNode):
         self.pseudo_costs[idx] = self.pseudo_costs.get(idx, {})
         self.pseudo_costs[idx][direction] = self.pseudo_costs[idx].get(
             direction, {'cost': 0, 'times': 0})
-        if node._lp.getStatusCode() in [0, 3]:  # optimal or hit max iters
-            bound_change = node._lp.objectiveValue - node.lower_bound
-            variable_change = node._b_val - node._lp.variablesUpper[idx] if \
-                direction == 'down' else node._lp.variablesLower[idx] - node._b_val
+        if node.lp.getStatusCode() in [0, 3]:  # optimal or hit max iters
+            bound_change = node.lp.objectiveValue - node.lower_bound
+            variable_change = node._b_val - node.lp.variablesUpper[idx] if \
+                direction == 'left' else node.lp.variablesLower[idx] - node._b_val
             cost = self.pseudo_costs[idx][direction]['cost']
             times = self.pseudo_costs[idx][direction]['times']
             self.pseudo_costs[idx][direction]['cost'] = (cost * times + bound_change /
@@ -93,8 +93,7 @@ class PseudoCostBranchNode(BaseNode):
         # cost stays 0 if strong branching was infeasible
         self.pseudo_costs[idx][direction]['times'] += 1
 
-    def branch(self: T, pseudo_costs: pseudo_costs_hint,
-               **kwargs: Any) -> Dict[str, T]:
+    def branch(self: T, pseudo_costs: pseudo_costs_hint, **kwargs: Any) -> Dict[str, T]:
         """ Branch via pseudo costs
 
         :param pseudo_costs: dictionary holding expected change in objective
@@ -108,7 +107,7 @@ class PseudoCostBranchNode(BaseNode):
         problems = self._check_pseudo_costs(pseudo_costs)
         assert not problems, f'pseudo cost dict has following errors: {problems}'
         b_idx = self._best_pseudo_costs_index(pseudo_costs)
-        return self._base_branch(b_idx)
+        return self._base_branch(b_idx, **kwargs)
 
     def _best_pseudo_costs_index(self: T, pseudo_costs: pseudo_costs_hint) -> int:
         """ Select the index that appears to give us the best combination of
@@ -119,9 +118,9 @@ class PseudoCostBranchNode(BaseNode):
         :return: index with the best pseudo cost
         """
         scores = {
-            i: min(pseudo_costs[i]['up']['cost'] *
+            i: min(pseudo_costs[i]['right']['cost'] *
                    (ceil(self.solution[i]) - self.solution[i]),
-                   pseudo_costs[i]['down']['cost'] *
+                   pseudo_costs[i]['left']['cost'] *
                    (self.solution[i] - floor(self.solution[i])))
             for i in self._integer_indices if self._is_fractional(self.solution[i])
         }
@@ -139,7 +138,7 @@ class PseudoCostBranchNode(BaseNode):
             if idx not in self._integer_indices:
                 problems.append(f'index {idx} not integer index')
                 continue
-            for direction in ['up', 'down']:
+            for direction in ['right', 'left']:
                 if direction not in pseudo_costs[idx]:
                     problems.append(f'index {idx} missing direction {direction}')
                     continue
