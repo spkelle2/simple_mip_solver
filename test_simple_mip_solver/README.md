@@ -5,7 +5,29 @@ package. `test_simple_mip_solver` is laid out in a manner that mirrors
 `simple_mip_solver`, with each test module located in a subpackage analogous to
 the original modules subpackage (e.g. since `psuedo_cost.py` is in the
 `simple_mip_solver.nodes.branch` subpackage, `test_psuedo_cost.py` is in the 
-`test_simple_mip_solver.test_nodes.test_branch` subpackage.)
+`test_simple_mip_solver.test_nodes.test_branch` subpackage.) Before I explain
+the contents of this directory, I would like to take a moment to explain the
+development workflow for anyone who wants to commit to this package
+
+## A Kind (but mandatory) Request for Repository Cleanliness
+If you would like to commit your changes back to the repo (or just make sure your
+code works in general), please follow this development cycle:
+* For any new classes or functions you create, please add unit tests that when run
+will confirm your changes run as expected. If adding to an existing file, place
+these tests in the existing respective test file. If you created a new file in the
+process, make sure to create a matching test file in the location that mirrors
+the file's location in the `simple_mip_solver` package.
+* Run all unit tests in this package to ensure your changes do not break existing
+functionality. I do this by calling from this project's root directory (with
+virtual environment active) the following:
+`python run -m unittest discover test_simple_mip_solver`. Ensure all tests pass
+before continuing.
+* Run [coverage](https://coverage.readthedocs.io/en/coverage-5.5/), generate the
+html report, and confirm you cover all your code additions with tests.
+* Upon completing all the above, feel free to open a pull request with the `dev`
+branch. The repository owner will review and merge.
+
+## Subpackage Overview
 
 In addition to unit tests, there is a module (`test_simple_mip_solver.example_models`)
 and directory (`test_simple_mip_solver/example_models/`) of predefined MILP's,
@@ -24,8 +46,9 @@ tree. Since branch and bound can for each node do something different based on
 whether the node is LP feasible, MILP feasible, or infeasible, I knew
 I would at a minimum need three different MILP's to test that we see expected behavior
 in each of those scenarios. In addition, we need a way of handling when feasible
-solutions are unbounded, bringing the base test set to four. These test models are
-as follows:
+solutions are unbounded, bringing the base test set to four. As time has gone on,
+I have needed to add more test models to ensure this package runs as expected,
+but details on the original test models are as follows:
 
 ### no_branch
 This model is a small MILP with a root node that has an LP relaxation that when

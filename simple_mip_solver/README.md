@@ -63,6 +63,13 @@ public attributes. I implemented as follows:
 * **Else**
     * `status` is set to "infeasible"
     
+##### dual_bound
+This method creates a dual function for the MIP after `solve` is called. New
+right hand sides of the constraints can be passed to this method, evaluated by
+the dual function, and will return a lower bound (when minimizing) of the optimal
+obejctive value if we were to resolve the MIP at the new right hand side.
+
+### Closing comments
 Note, however, that search, branch, and bound were left intentionally vague
 as they are methods defined by the class passed to the `Node` argument in the
 `branch_and_bound.BranchAndBound` constructor. For specifics on those methods,
