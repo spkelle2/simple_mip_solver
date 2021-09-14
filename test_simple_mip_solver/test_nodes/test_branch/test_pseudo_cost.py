@@ -3,7 +3,7 @@ import unittest
 from unittest.mock import patch
 
 from simple_mip_solver.nodes.branch.pseudo_cost import PseudoCostBranchNode
-from test_simple_mip_solver.example_models import small_branch
+from test_simple_mip_solver.example_models import small_branch_copy
 
 from test_simple_mip_solver.helpers import TestModels
 
@@ -16,19 +16,19 @@ class TestNode(TestModels):
         self.kwargs = {'pseudo_costs': {}}
 
     def test_init(self):
-        node = PseudoCostBranchNode(small_branch.lp, small_branch.integerIndices)
+        node = PseudoCostBranchNode(small_branch_copy.lp, small_branch_copy.integerIndices)
         self.assertTrue(node.branch_method == 'pseudo cost')
         self.assertFalse(node.pseudo_costs, 'should exist but be none')
         self.assertFalse(node.strong_branch_iters, 'should exist but be none')
 
     def test_bound_fails_assertions(self):
         pc = {1: 'hi'}
-        node = PseudoCostBranchNode(small_branch.lp, small_branch.integerIndices)
+        node = PseudoCostBranchNode(small_branch_copy.lp, small_branch_copy.integerIndices)
         self.assertRaisesRegex(AssertionError, 'pseudo cost dict has following errors:',
                                node.bound, pc)
 
     def test_bound(self):
-        node = PseudoCostBranchNode(small_branch.lp, small_branch.integerIndices)
+        node = PseudoCostBranchNode(small_branch_copy.lp, small_branch_copy.integerIndices)
         rtn = node.bound({})
 
         # check assignments
@@ -49,7 +49,7 @@ class TestNode(TestModels):
                 self.assertTrue(rtn['pseudo_costs'][idx][direction]['cost'] == 0)
 
         # check function calls
-        node = PseudoCostBranchNode(small_branch.lp, small_branch.integerIndices)
+        node = PseudoCostBranchNode(small_branch_copy.lp, small_branch_copy.integerIndices)
         node.lp_feasible = False
         with patch.object(node, '_check_pseudo_costs') as cpc, \
                 patch.object(node, '_base_bound') as bb, \
@@ -60,7 +60,7 @@ class TestNode(TestModels):
             self.assertTrue(bb.call_count == 1)
             self.assertTrue(upc.call_count == 0)
 
-        node = PseudoCostBranchNode(small_branch.lp, small_branch.integerIndices)
+        node = PseudoCostBranchNode(small_branch_copy.lp, small_branch_copy.integerIndices)
         node.lp_feasible = True
         with patch.object(node, '_check_pseudo_costs') as cpc, \
                 patch.object(node, '_base_bound') as bb, \
@@ -72,7 +72,7 @@ class TestNode(TestModels):
             self.assertTrue(upc.call_count == 1)
 
     def test_update_pseudo_costs(self):
-        node = PseudoCostBranchNode(small_branch.lp, small_branch.integerIndices)
+        node = PseudoCostBranchNode(small_branch_copy.lp, small_branch_copy.integerIndices)
         node.pseudo_costs = {}
         node._base_bound()
 
@@ -80,10 +80,10 @@ class TestNode(TestModels):
         # check we call strong branch once and calculate costs twice for each sb_index
         with patch.object(node, '_strong_branch') as sb, \
                 patch.object(node, '_calculate_costs') as cc:
-            sb.return_value = {'right': PseudoCostBranchNode(small_branch.lp,
-                                                          small_branch.integerIndices),
-                               'left': PseudoCostBranchNode(small_branch.lp,
-                                                            small_branch.integerIndices)}
+            sb.return_value = {'right': PseudoCostBranchNode(small_branch_copy.lp,
+                                                          small_branch_copy.integerIndices),
+                               'left': PseudoCostBranchNode(small_branch_copy.lp,
+                                                            small_branch_copy.integerIndices)}
             node._update_pseudo_costs()
             self.assertTrue(sb.call_count == 2)
             self.assertTrue(cc.call_count == 4)
@@ -98,16 +98,16 @@ class TestNode(TestModels):
         left_node._base_bound()
         with patch.object(left_node, '_strong_branch') as sb, \
                 patch.object(left_node, '_calculate_costs') as cc:
-            sb.return_value = {'right': PseudoCostBranchNode(small_branch.lp,
-                                                          small_branch.integerIndices),
-                               'left': PseudoCostBranchNode(small_branch.lp,
-                                                            small_branch.integerIndices)}
+            sb.return_value = {'right': PseudoCostBranchNode(small_branch_copy.lp,
+                                                          small_branch_copy.integerIndices),
+                               'left': PseudoCostBranchNode(small_branch_copy.lp,
+                                                            small_branch_copy.integerIndices)}
             left_node._update_pseudo_costs()
             self.assertTrue(sb.call_count == 1)
             self.assertTrue(cc.call_count == 3)
 
     def test_calculate_costs(self):
-        node = PseudoCostBranchNode(small_branch.lp, small_branch.integerIndices)
+        node = PseudoCostBranchNode(small_branch_copy.lp, small_branch_copy.integerIndices)
         node.pseudo_costs = {}
         node._base_bound()
 
@@ -138,7 +138,7 @@ class TestNode(TestModels):
 
     def test_branch_fails_assertions(self):
         pc = {1: 'hi'}
-        node = PseudoCostBranchNode(small_branch.lp, small_branch.integerIndices)
+        node = PseudoCostBranchNode(small_branch_copy.lp, small_branch_copy.integerIndices)
         self.assertRaisesRegex(AssertionError, 'pseudo cost dict has following errors:',
                                node.branch, pc)
         node.mip_feasible = True
@@ -146,7 +146,7 @@ class TestNode(TestModels):
                                node.branch, pc)
 
     def test_branch(self):
-        node = PseudoCostBranchNode(small_branch.lp, small_branch.integerIndices)
+        node = PseudoCostBranchNode(small_branch_copy.lp, small_branch_copy.integerIndices)
         rtn = node.bound({})
 
         # check function calls
@@ -161,7 +161,7 @@ class TestNode(TestModels):
             self.assertTrue(bb.called)
 
         # check return
-        node = PseudoCostBranchNode(small_branch.lp, small_branch.integerIndices)
+        node = PseudoCostBranchNode(small_branch_copy.lp, small_branch_copy.integerIndices)
         rtn = node.bound({})
         rtn = node.branch(rtn['pseudo_costs'], )
         for direction in ['right', 'left']:
@@ -172,7 +172,7 @@ class TestNode(TestModels):
     def test_best_pseudo_cost_index(self):
         pc = {1: {'right': {'cost': 1, 'times': 1}, 'left': {'cost': 1, 'times': 1}},
               2: {'right': {'cost': 1, 'times': 1}, 'left': {'cost': 1, 'times': 1}}}
-        node = PseudoCostBranchNode(small_branch.lp, small_branch.integerIndices)
+        node = PseudoCostBranchNode(small_branch_copy.lp, small_branch_copy.integerIndices)
         node.solution = [0, 1.25, 2.5]
         self.assertTrue(node._best_pseudo_costs_index(pc) == 2)
         pc[1] = {'right': {'cost': 10, 'times': 1}, 'left': {'cost': 1, 'times': 1}}
@@ -181,7 +181,7 @@ class TestNode(TestModels):
         self.assertTrue(node._best_pseudo_costs_index(pc) == 1)
 
     def test_check_pseudo_costs(self):
-        node = PseudoCostBranchNode(small_branch.lp, small_branch.integerIndices)
+        node = PseudoCostBranchNode(small_branch_copy.lp, small_branch_copy.integerIndices)
 
         # check good
         self.assertFalse(node._check_pseudo_costs({}), 'empty should be fine')

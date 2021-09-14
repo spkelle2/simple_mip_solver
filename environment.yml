@@ -14,3 +14,4 @@ dependencies:
   - pip:
     - coinor-cuppy
     - cylp
+    - coverage

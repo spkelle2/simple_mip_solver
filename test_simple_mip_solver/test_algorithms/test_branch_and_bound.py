@@ -285,16 +285,26 @@ class TestBranchAndBound(unittest.TestCase):
             self.assertTrue(arc.call_count == 1, 'should call add right child')
 
     def test_dual_bound_fails_asserts(self):
-        pass
+        bb = BranchAndBound(small_branch)
+        self.assertRaisesRegex(AssertionError, 'must solve this instance before',
+                               bb.dual_bound, CyLPArray([2.5, 4.5]))
+        bb.solve()
+        self.assertRaisesRegex(AssertionError, 'only works with CyLP arrays',
+                               bb.dual_bound, np.array([2.5, 4.5]))
+        self.assertRaisesRegex(AssertionError, 'shape of the RHS being added should match',
+                               bb.dual_bound, CyLPArray([4.5]))
+
+        bb = BranchAndBound(infeasible2)
+        bb._root_node.lp += np.matrix([[0, -1, -1]]) * bb._root_node.lp.getVarByName('x') >= CyLPArray([-2.5])
+        bb.solve()
+        self.assertRaisesRegex(AssertionError, 'feature expects the root node to have a single constraint object',
+                               bb.dual_bound, CyLPArray([2.5, 4.5]))
+
 
     def test_dual_bound(self):
-        """ Ensure that BranchAndBound.dual_bound generates the dual function
-        that we saw in ISE 418 HW 3 problem 1
 
-        todo: patch function calls and test that just the functions are called when expected
-
-        :return:
-        """
+        # Ensure that BranchAndBound.dual_bound generates the dual function
+        # that we saw in ISE 418 HW 3 problem 1
         bb = BranchAndBound(h3p1)
         bb.solve()
         bound = bb.dual_bound(CyLPArray([3.5, -3.5]))
@@ -314,11 +324,29 @@ class TestBranchAndBound(unittest.TestCase):
             self.assertTrue(bound <= new_bb.objective_value + .01,
                             'dual bound value should be at most the value function for this rhs')
 
-    def test_calculate_dual_bounds_fails_asserts(self):
-        pass
+        bb = BranchAndBound(small_branch)
+        bb.solve()
+        bound = bb.dual_bound(CyLPArray([2.5, 4.5]))
 
-    def test_calculate_dual_bounds(self):
-        pass
+        # just make sure the dual bound works here too
+        self.assertTrue(bound <= -5.99,
+                        'dual bound value should be at most the value function for this rhs')
+
+        # check function calls
+        bb = BranchAndBound(small_branch)
+        bb.solve()
+        bound_duals = [bb._bound_dual(n.lp) for n in bb._tree.get_node_instances([6, 12, 10, 8, 2])]
+        with patch.object(bb, '_bound_dual') as bd:
+            bd.side_effect = bound_duals
+            bound = bb.dual_bound(CyLPArray([3, 3]))
+            self.assertTrue(bd.call_count == 5)
+
+        bb = BranchAndBound(small_branch)
+        bb.solve()
+        bound = bb.dual_bound(CyLPArray([3, 3]))
+        with patch.object(bb, '_bound_dual') as bd:
+            bound = bb.dual_bound(CyLPArray([1, 1]))
+            self.assertFalse(bd.called)
 
     def test_bound_dual(self):
         bb = BranchAndBound(infeasible2)

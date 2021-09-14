@@ -1,11 +1,13 @@
+from coinor.cuppy.milpInstance import MILPInstance
 from cylp.cy import CyClpSimplex
 import inspect
+import numpy as np
 import unittest
 from unittest.mock import patch
 
 from simple_mip_solver import BaseNode
 from simple_mip_solver.algorithms.utils import Utils
-from test_simple_mip_solver.example_models import small_branch
+from test_simple_mip_solver.example_models import small_branch, h3p1
 
 
 class TestUtils(unittest.TestCase):
@@ -19,10 +21,18 @@ class TestUtils(unittest.TestCase):
         alg = Utils(small_branch, BaseNode, self._node_attributes, self._node_funcs)
 
         # check attributes
+        self.assertTrue(alg._swapped_constraint_direction)
         self.assertTrue(inspect.isclass(alg._Node))
-        self.assertTrue(alg._root_node)
-        self.assertTrue(alg.model)
+        self.assertTrue(isinstance(alg._root_node, alg._Node))
+        self.assertTrue((alg._root_node.lp.coefMatrix == np.matrix([[-1, 0, -1], [0, -1, 0]])).all(),
+                        'A should flip')
+        self.assertTrue(all(alg._root_node.lp.constraintsLower == np.array([-1.5, -1.25]))
+                        and all(alg._root_node.lp.constraintsUpper >= np.array([1e300, 1e300])),
+                        'so should b')
+        self.assertTrue(isinstance(alg.model, MILPInstance))
+        self.assertFalse(alg._evaluated_nodes)
         self.assertTrue(alg._kwargs == {'next_node_idx': 1})
+        self.assertTrue(alg._M == 999999999)
 
         # check function calls
         with patch.object(Utils, '_convert_constraints_to_greq') as cctg:
@@ -30,6 +40,16 @@ class TestUtils(unittest.TestCase):
             alg = Utils(small_branch, BaseNode, self._node_attributes,
                         self._node_funcs, standardize_model=True)
             self.assertTrue(cctg.called)
+
+        # just make sure a prob that starts >= shows that its constraints didnt change
+        alg = Utils(h3p1, BaseNode, self._node_attributes, self._node_funcs)
+        self.assertFalse(alg._swapped_constraint_direction)
+        self.assertTrue((alg._root_node.lp.coefMatrix ==
+                         np.matrix([[2, 5, -2, -2, 5, 5], [-2, -5, 2, 2, -5, -5]])).all(),
+                        'A should flip')
+        self.assertTrue(all(alg._root_node.lp.constraintsLower == np.array([3.5, -3.5]))
+                        and all(alg._root_node.lp.constraintsUpper >= np.array([1e300, 1e300])),
+                        'so should b')
 
     def test_init_fails_asserts(self):
         lp = CyClpSimplex()

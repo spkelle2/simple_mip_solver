@@ -70,6 +70,18 @@ u = CyLPArray([10, 10, 10])
 small_branch = MILPInstance(A=A, b=b, c=c, l=l, u=u, sense=['Max', '<='],
                             integerIndices=[0, 1, 2], numVars=3)
 
+# a copy of the above to avoid test_pseudo_cost failing when running all tests in series
+# and using this model after its attributes have been changed
+A = np.matrix([[1, 0, 1],
+               [0, 1, 0]])
+b = CyLPArray([1.5, 1.25])
+c = CyLPArray([1, 1, 1])
+l = CyLPArray([0, 0, 0])
+u = CyLPArray([10, 10, 10])
+
+small_branch_copy = MILPInstance(A=A, b=b, c=c, l=l, u=u, sense=['Max', '<='],
+                                 integerIndices=[0, 1, 2], numVars=3)
+
 # ------------------------ a model that is infeasible ------------------------
 A = np.matrix([[1, 1, 0]])
 b = CyLPArray([-1])

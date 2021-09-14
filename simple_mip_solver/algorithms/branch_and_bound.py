@@ -210,45 +210,27 @@ class BranchAndBound(Utils):
             'the shape of the RHS being added should match that of each node'
         
         b = -b if self._swapped_constraint_direction else b
-        # nb: after first call, this routine will not bound duals again
+        # note: after first call, this routine will not bound duals again since they already are
         # also does not update other attributes of the node to reflect its values from solve
         infeasible_nodes = [n for n in terminal_nodes if n.lp.getStatusCode() == 1]
         for n in infeasible_nodes:
             n.lp = self._bound_dual(n.lp)
-        return min(self._calculate_dual_bounds(terminal_nodes, b).values())
-        # for testing, assert strong at b and leq for all other b
-        # assert dual comes out to value we expect for some problem
-        # assert that any duplicate call does not result in bound_dual being called
-        # but first call hits all the infeasible nodes
 
-    def _calculate_dual_bounds(self, nodes: List[BaseNode], b: CyLPArray) -> Dict[int, float]:
-        """ Calculate the lower bound on each of a list of nodes evaluated at a new
-        RHS b based on their current dual solution
+        assert all(n.lp.getStatusCode() in [-1, 0] for n in terminal_nodes)
 
-        todo: Why again can we take a max here in each lineage? Well, when minimizing,
-        ancestors' LP relaxes are LB on terminal node objective value.
-        Since ancestor dual evals at b are LB for for each ancestor node, they are
-        also LB's for terminal node
-
-        :param nodes: list of node instances
-        :param b:
-        :return:
-        """
-
-        assert all(isinstance(n, self._Node) for n in nodes), 'all nodes should be instance of given Node type'
-        assert all(n.lp.getStatusCode() in [-1, 0] for n in nodes), \
-            'all nodes must have finite optimal solutions'
-
+        # We take a max in each lineage because when minimizing b/c ancestors' LP relaxes
+        # are LB on terminal node objective value. Since ancestor dual evals at b are
+        # LB for for each ancestor node, they are also LB's for terminal node
         bounds = {}
-        for node in nodes:
+        for node in terminal_nodes:
             lineage = [node] + self._tree.get_node_instances(self._tree.get_ancestors(node.idx))
             bounds[node.idx] = max(
                 np.inner(n.lp.dualConstraintSolution[n.lp.constraints[0].name], b) +
-                np.inner(np.maximum(n.lp.dualVariableSolution['x'], np.zeros(n.lp.nVariables)), n.lp.variablesLower) +
-                np.inner(np.minimum(n.lp.dualVariableSolution['x'], np.zeros(n.lp.nVariables)), n.lp.variablesUpper)
+                np.inner(np.maximum(np.concatenate([sol for sol in n.lp.dualVariableSolution.values()]), np.zeros(n.lp.nVariables)), n.lp.variablesLower) +
+                np.inner(np.minimum(np.concatenate([sol for sol in n.lp.dualVariableSolution.values()]), np.zeros(n.lp.nVariables)), n.lp.variablesUpper)
                 for n in lineage
             )
-        return bounds
+        return min(bounds.values())
 
     def _bound_dual(self, cur_lp: CyClpSimplex) -> CyClpSimplex:
         """ Place a bound on each index of the dual variable associated with the
@@ -257,8 +239,9 @@ class BranchAndBound(Utils):
         and we give each new variable a large, positive coefficient in the objective.
         By duality, we get the desired dual LP constraints. Therefore, for nodes
         with infeasible primal LP relaxations and unbounded dual LP relaxations,
-        resolving gives us a finite dual solution, which can be used to parametrically
-        lower bound the objective value of this node as we change its right hand side.
+        resolving gives us a finite (albeit very large) dual solution, which can
+        be used to parametrically lower bound the objective value of this node as
+        we change its right hand side.
 
         :param cur_lp: the CyClpSimplex instance for which we want to bound its
         dual solution and resolve
@@ -268,7 +251,6 @@ class BranchAndBound(Utils):
 
         # we add slack at end so user does not have to worry about adding to each node they create
         # and so we don't have to go back and update needlessly
-
         assert isinstance(cur_lp, CyClpSimplex), 'must give CyClpSimplex instance'
         for i, constr in enumerate(cur_lp.constraints):
             assert f's_{i}' not in [v.name for v in cur_lp.variables], \
@@ -276,6 +258,7 @@ class BranchAndBound(Utils):
 
         # cylp lacks (a documented) way to add a column, so rebuild the LP :[
         new_lp = CyClpSimplex()
+        new_lp.logLevel = 0  # quiet output when resolving
 
         # recreate variables
         var_map = {v: new_lp.addVariable(v.name, v.dim) for v in cur_lp.variables}
@@ -284,7 +267,7 @@ class BranchAndBound(Utils):
         for orig_v, new_v in var_map.items():
             new_lp += CyLPArray(orig_v.lower) <= new_v <= CyLPArray(orig_v.upper)
 
-        # re-add constraints, with slacks this time todo: just use lp.coef matrix here
+        # re-add constraints, with slacks this time
         s = {}
         for i, constr in enumerate(cur_lp.constraints):
             s[i] = new_lp.addVariable(f's_{i}', constr.nRows)

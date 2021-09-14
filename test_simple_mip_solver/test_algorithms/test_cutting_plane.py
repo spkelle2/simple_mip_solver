@@ -40,3 +40,6 @@ class TestNode(unittest.TestCase):
         self.assertTrue(np.max(np.abs(cp.solution - np.array([7, 5]))) < cp._root_node._epsilon)
         self.assertTrue(isclose(cp.objective_value, -5, abs_tol=.01))
 
+
+if __name__ == '__main__':
+    unittest.main()
