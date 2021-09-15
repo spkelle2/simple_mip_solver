@@ -13,6 +13,8 @@ class Utils:
                  node_funcs: List[str], **kwargs: Any):
         # model asserts
         assert isinstance(model, MILPInstance), 'model must be cuppy MILPInstance'
+        # cuidado: this model may have changed from what you provided. bear that in mind
+        # when using its reference in the future
         self.model = self._convert_constraints_to_greq(model)
         self._swapped_constraint_direction = model.sense != self.model.sense
 

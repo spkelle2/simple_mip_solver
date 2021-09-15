@@ -3,6 +3,7 @@ from coinor.grumpy.BranchAndBound import GenerateRandomMIP
 from cylp.cy import CyClpSimplex
 from cylp.py.modeling.CyLPModel import CyLPArray
 from itertools import product
+import os
 import pandas as pd
 import numpy as np
 
@@ -45,6 +46,44 @@ def generate_random_variety():
                       f'_max_obj_coeff_{max_obj_coeffs[max_obj_coeff]}'
                       f'_max_cons_coeff_{max_cons_coeffs[max_cons_coeff]}'
                       f'_tightness_{tightnesses[tightness]}.mps')
+
+
+def generate_random_value_functions(num_probs=40, num_evals=40):
+    for prob_num in range(num_probs):
+        num_vars = 4
+        num_constrs = 2
+        density = np.random.uniform(.2, .8)
+        max_obj_coef = np.random.randint(10, 100)
+        max_const_coef = np.random.randint(10, 100)
+        tightness = 15
+
+        # get a random A and objective
+        cs, vs, objective, A, b = GenerateRandomMIP(
+            numVars=num_vars, numCons=num_constrs, density=density, maxObjCoeff=max_obj_coef,
+            maxConsCoeff=max_const_coef, tightness=15
+        )
+        A = np.asmatrix(pd.DataFrame.from_dict(A).to_numpy())
+        objective = CyLPArray(list(objective.values()))
+        l = CyLPArray([0] * len(vs))
+        u = CyLPArray([max_obj_coef] * len(vs))
+
+        # make a new directory to save all these instances
+        fldr = f'example_value_functions/instance_{prob_num}'
+        os.mkdir(fldr)
+
+        for eval_num in range(num_evals):
+            # make a random b for each evaluation of this instance
+            b = CyLPArray(
+                [np.random.randint(int(num_vars * density * max_const_coef / tightness),
+                                   int(num_vars * density * max_const_coef / 1.5))
+                 for i in range(num_constrs)]
+            )
+            instance = MILPInstance(A=A, b=b, c=objective, l=l, u=u, sense=['Max', '<='],
+                                    integerIndices=list(range(len(vs))), numVars=len(vs))
+            for i in instance.integerIndices:
+                instance.lp.setInteger(i)
+            file = f'evaluation_{eval_num}'
+            instance.lp.writeMps(f'{os.path.join(fldr, file)}.mps')
 
 
 # ----------------- a model with MIP feasible LP relaxation -----------------
@@ -219,4 +258,5 @@ h3p1_5 = MILPInstance(A=A, b=b, c=c, l=l, sense=['Min', '>='],
                       integerIndices=[0, 1, 3], numVars=6)
 
 if __name__ == '__main__':
-    generate_random_variety()
+    # generate_random_variety()
+    generate_random_value_functions()
