@@ -1,16 +1,21 @@
+from coinor.cuppy.milpInstance import MILPInstance
 from cylp.cy.CyClpSimplex import CyClpSimplex, CyLPArray
+import inspect
 from math import isclose
 import numpy as np
+import os
 from queue import PriorityQueue
+import re
 import unittest
 from unittest.mock import patch
 
 from simple_mip_solver import BaseNode, BranchAndBound, \
-    PseudoCostBranchDepthFirstSearchNode as PCBDFSNode
+    PseudoCostBranchDepthFirstSearchNode as PCBDFSNode, PseudoCostBranchNode
 from simple_mip_solver.algorithms.branch_and_bound import BranchAndBoundTree
 from simple_mip_solver.algorithms.utils import Utils
 from test_simple_mip_solver.example_models import no_branch, small_branch, infeasible, \
     unbounded, infeasible2, h3p1, h3p1_0, h3p1_1, h3p1_2, h3p1_3, h3p1_4, h3p1_5
+from test_simple_mip_solver import example_models
 
 
 class TestBranchAndBoundTree(unittest.TestCase):
@@ -300,7 +305,6 @@ class TestBranchAndBound(unittest.TestCase):
         self.assertRaisesRegex(AssertionError, 'feature expects the root node to have a single constraint object',
                                bb.dual_bound, CyLPArray([2.5, 4.5]))
 
-
     def test_dual_bound(self):
 
         # Ensure that BranchAndBound.dual_bound generates the dual function
@@ -347,6 +351,26 @@ class TestBranchAndBound(unittest.TestCase):
         with patch.object(bb, '_bound_dual') as bd:
             bound = bb.dual_bound(CyLPArray([1, 1]))
             self.assertFalse(bd.called)
+
+    def test_dual_bound_many_times(self):
+        pattern = re.compile('evaluation_(\d+).mps')
+        fldr_pth = os.path.join(os.path.dirname(os.path.abspath(inspect.getfile(example_models))),
+                                'example_value_functions')
+        for count, sub_fldr in enumerate(os.listdir(fldr_pth)):
+            print(f'dual bound {count}')
+            sub_fldr_pth = os.path.join(fldr_pth, sub_fldr)
+            evals = {}
+            for file in os.listdir(sub_fldr_pth):
+                eval_num = int(pattern.search(file).group(1))
+                instance = MILPInstance(file_name=os.path.join(sub_fldr_pth, file))
+                bb = BranchAndBound(instance, PseudoCostBranchNode, pseudo_costs={})
+                bb.solve()
+                evals[eval_num] = bb
+            instance_0 = evals[0]
+            for bb in evals.values():
+                # all problems were given as <=, so their constraints were flipped by default
+                self.assertTrue(instance_0.dual_bound(CyLPArray(-bb.model.b)) <=
+                                bb.objective_value + .01, 'dual_bound should be less')
 
     def test_bound_dual(self):
         bb = BranchAndBound(infeasible2)

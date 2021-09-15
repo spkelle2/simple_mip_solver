@@ -19,6 +19,8 @@ class CuttingPlaneBoundNode(BaseNode):
         super().__init__(*args, **kwargs)
         assert self._sense == '>=', 'must have Ax >= b'
         assert self._variables_nonnegative, 'must have x >= 0 for all variables'
+        assert len(self.lp.variables) == 1 and self.lp.variables[0].name == 'x', \
+            'x must be our only variable'
 
     # def branch(self: G, **kwargs: Any) -> Dict[str, Any]:
     #     return super().branch(**kwargs)

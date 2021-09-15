@@ -44,6 +44,10 @@ class TestNode(TestModels):
         self.assertRaisesRegex(AssertionError, 'must have x >= 0 for all variables',
                                CuttingPlaneBoundNode, self.cut1_std.lp,
                                self.cut1_std.integerIndices)
+        s = self.cut2_std.lp.addVariable('s', 1)
+        self.cut2_std.lp += s >= CyLPArray([0])
+        self.assertRaisesRegex(AssertionError, 'x must be our only variable',
+                               CuttingPlaneBoundNode, self.cut2_std.lp, self.cut2_std.integerIndices)
 
     def test_bound(self):
         # check function calls
