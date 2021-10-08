@@ -14,7 +14,7 @@ from unittest.mock import patch
 
 from simple_mip_solver import CuttingPlaneBoundNode, BaseNode
 from simple_mip_solver.algorithms.utils import Utils
-from test_simple_mip_solver.example_models import cut1, infeasible, no_branch, cut2
+from test_simple_mip_solver.example_models import cut1, infeasible, no_branch, cut2, lift_project
 from test_simple_mip_solver.helpers import TestModels
 
 
@@ -24,7 +24,8 @@ class TestNode(TestModels):
     def setUp(self) -> None:
         # reset models each test so lps dont keep added constraints
         for name, m in {'cut1_std': cut1, 'cut2_std': cut2,
-                        'infeasible_std': infeasible, 'no_branch_std': no_branch}.items():
+                        'infeasible_std': infeasible, 'no_branch_std': no_branch,
+                        'lift_project_std': lift_project}.items():
             lp = m.lp
             new_m = MILPInstance(A=m.A, b=m.b, c=lp.objective, l=m.l, sense=['Min', m.sense],
                                  integerIndices=m.integerIndices, numVars=len(lp.objective))
@@ -108,6 +109,32 @@ class TestNode(TestModels):
         self.assertTrue(isclose(pi0, -22.5, abs_tol=.01))
         pi0 = node._optimize_cut(cuts[1][0])
         self.assertTrue(isclose(pi0, -15, abs_tol=.01))
+
+    def test_find_split_inequality_fails_asserts(self):
+        pass
+
+    def test_find_split_inequality_both_sides_feasible(self):
+        node = CuttingPlaneBoundNode(self.lift_project_std.lp,
+                                     self.lift_project_std.integerIndices)
+        node.bound(optimized_gomory_cuts=False)
+        self.assertTrue(all(node.solution == [1.5, .5]), 'this is expected solution')
+        pi, pi0 = node._find_split_inequality(0)
+        self.assertTrue(len(pi) == 2)
+        self.assertTrue(isclose(pi[0], 0, abs_tol=.01))
+        self.assertTrue(isclose(pi[1], .25, abs_tol=.01))
+        self.assertTrue(isclose(pi0, .25, abs_tol=.01))
+
+    def test_find_split_inequality_one_side_infeasible(self):
+        node = CuttingPlaneBoundNode(self.lift_project_std.lp,
+                                     self.lift_project_std.integerIndices)
+        node.bound(optimized_gomory_cuts=False)
+        self.assertTrue(all(node.solution == [1.5, .5]), 'this is expected solution')
+        pi, pi0 = node._find_split_inequality(1)
+        # should get same result as when both sides feasible
+        self.assertTrue(len(pi) == 2)
+        self.assertTrue(isclose(pi[0], 0, abs_tol=.01))
+        self.assertTrue(isclose(pi[1], .25, abs_tol=.01))
+        self.assertTrue(isclose(pi0, .25, abs_tol=.01))
 
     def test_models(self):
         # self.base_test_models(standardize_model=True)

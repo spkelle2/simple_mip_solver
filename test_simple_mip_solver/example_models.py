@@ -257,6 +257,26 @@ l = CyLPArray([0, 0, 0, 0, 0, 0])
 h3p1_5 = MILPInstance(A=A, b=b, c=c, l=l, sense=['Min', '>='],
                       integerIndices=[0, 1, 3], numVars=6)
 
+# -------------------- instance to test lift and project ---------------------
+A = np.matrix([[-1, 1],
+               [1, 1]])
+b = CyLPArray([[-1],
+               [2]])
+c = CyLPArray([1, 2])
+l = CyLPArray([0, 0])
+lift_project = MILPInstance(A=A, b=b, c=c, l=l, sense=['Min', '>='],
+                            integerIndices=[0, 1], numVars=2)
+
+# ----------------------------- square instance ------------------------------
+A = np.matrix([[1, 0],
+               [0, 1]])
+b = CyLPArray([[1.5],
+               [1.5]])
+c = CyLPArray([1, 1])
+l = CyLPArray([0, 0])
+square = MILPInstance(A=A, b=b, c=c, l=l, sense=['Max', '<='],
+                      integerIndices=[0, 1], numVars=2)
+
 if __name__ == '__main__':
     # generate_random_variety()
     generate_random_value_functions()
