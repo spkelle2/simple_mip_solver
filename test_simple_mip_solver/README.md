@@ -23,7 +23,14 @@ virtual environment active) the following:
 `python run -m unittest discover test_simple_mip_solver`. Ensure all tests pass
 before continuing.
 * Run [coverage](https://coverage.readthedocs.io/en/coverage-5.5/), generate the
-html report, and confirm you cover all your code additions with tests.
+html report, and confirm you cover all your code additions with tests. Specifically,
+this means the following:
+  * Run `coverage run -m unittest discover test_simple_mip_solver` from this
+  project's root directory to run all the unit tests and coverage's analysis
+  * Run `coverage html` to convert coverage's analysis to html
+  * Rpen the `htmlcov` folder in the project's root directory and open the `index.html`
+  file. Check that there are no red highlights over code you added. If there is,
+  add unit tests for those portions and repeat the above process.
 * Upon completing all the above, feel free to open a pull request with the `dev`
 branch. The repository owner will review and merge.
 
