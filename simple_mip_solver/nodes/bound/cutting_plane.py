@@ -1,7 +1,9 @@
 from __future__ import annotations
 from coinor.cuppy.milpInstance import MILPInstance
+from cylp.cy.CyClpSimplex import CyClpSimplex
 from cylp.py.modeling.CyLPModel import CyLPArray, CyLPExpr
 from typing import Dict, Any, TypeVar, Tuple, List
+from math import floor, ceil
 import numpy as np
 
 from simple_mip_solver import BaseNode, BranchAndBound, PseudoCostBranchNode
@@ -56,7 +58,7 @@ class CuttingPlaneBoundNode(BaseNode):
             cut = pi * self.lp.getVarByName('x') >= pi0
             self.lp.addConstraint(cut)
 
-    def _find_gomory_cuts(self: G) -> List[Tuple[np.ndarray, float]]:
+    def _find_gomory_cuts(self: G) -> List[Tuple[CyLPArray, float]]:
         """Find Gomory Mixed Integer Cuts (GMICs) for this node's solution.
         Defined in Lehigh University ISE 418 lecture 14 slide 18 and 5.31
         in Conforti et al Integer Programming. Assumes Ax >= b and x >= 0.
@@ -123,3 +125,57 @@ class CuttingPlaneBoundNode(BaseNode):
         return bb.objective_value if bb.status == 'optimal' else bb._global_lower_bound
         # need lower bound because upper bound is furthest feasible point intersecting
         # the cut. lower bound then ensures no feasible points cut
+
+    def _add_split_inequality(self: G, **kwargs: Any):
+        pass
+        # pi, pi0 = self._find_lift_and_project_cut()
+        # cut = pi * self.lp.getVarByName('x') >= pi0  # which direction in derivation
+        # self.lp.addConstraint(cut)
+
+    def _find_split_inequality(self: G, idx: int, **kwargs: Any):
+        assert idx in self._integer_indices, 'must lift and project on integer index'
+        x_idx = self.solution[idx]
+        assert self._is_fractional(x_idx), "must lift and project on index with fractional value"
+
+        # build the CGLP model from ISE 418 Lecture 15 Slide 7 but for LP with >= constraints
+        lp = CyClpSimplex()
+
+        # declare variables
+        pi = lp.addVariable('pi', self.lp.nVariables)
+        pi0 = lp.addVariable('pi0', 1)
+        u1 = lp.addVariable('u1', self.lp.nConstraints)
+        u2 = lp.addVariable('u2', self.lp.nConstraints)
+        w1 = lp.addVariable('w1', self.lp.nVariables)
+        w2 = lp.addVariable('w2', self.lp.nVariables)
+
+        # set bounds
+        lp += u1 >= CyLPArray(np.zeros(self.lp.nConstraints))
+        lp += u2 >= CyLPArray(np.zeros(self.lp.nConstraints))
+
+        w_ub = CyLPArray(np.zeros(self.lp.nVariables))
+        w_ub[idx] = float('inf')
+        lp += w_ub >= w1 >= CyLPArray(np.zeros(self.lp.nVariables))
+        lp += w_ub >= w2 >= CyLPArray(np.zeros(self.lp.nVariables))
+
+        # set constraints
+        # (pi, pi0) must be valid for both parts of the disjunction
+        lp += 0 >= -pi + self.lp.coefMatrix.T * u1 - w1
+        lp += 0 >= -pi + self.lp.coefMatrix.T * u2 + w2
+        lp += 0 <= -pi0 + CyLPArray(self.lp.constraintsLower) * u1 - floor(x_idx) * w1.sum()
+        lp += 0 <= -pi0 + CyLPArray(self.lp.constraintsLower) * u2 + ceil(x_idx) * w2.sum()
+        # normalize variables
+        lp += u1.sum() + u2.sum() + w1.sum() + w2.sum() == 1
+
+        # set objective: find the deepest cut
+        # since pi * x >= pi0 for all x in disjunction, we want min pi * x_star - pi0
+        lp.objective = CyLPArray(self.solution) * pi - pi0
+
+        # solve
+        lp.primal(startFinishOptions='x')
+        assert lp.getStatusCode() == 0, 'we should get optimal solution'
+        assert lp.objectiveValue <= 0, 'pi * x >= pi -> pi * x - pi >= 0 -> ' \
+                                       'negative objective at x^* since it gets cut off'
+
+        # get solution
+        return lp.primalVariableSolution['pi'], lp.primalVariableSolution['pi0']
+
