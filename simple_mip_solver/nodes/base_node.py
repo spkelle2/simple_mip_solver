@@ -15,11 +15,13 @@ class BaseNode:
     best-first search and most fractional branching.
     """
 
-    def __init__(self: T, lp: CyClpSimplex, integer_indices: List[int], idx: int = 0,
+    def __init__(self: T, lp: CyClpSimplex, integer_indices: List[int], idx: int = None,
                  lower_bound: Union[float, int] = -float('inf'), b_idx: int = None,
-                 b_dir: str = None, b_val: float = None, depth=0):
+                 b_dir: str = None, b_val: float = None, depth: int = 0,
+                 ancestors: tuple = None):
         """
         :param lp: model object simplex is run against. Assumed Ax >= b
+        :param idx: index of this node (e.g. in the branch and bound tree)
         :param integer_indices: indices of variables we aim to find integer solutions
         :param lower_bound: starting lower bound on optimal objective value
         for the minimization problem in this node
@@ -27,11 +29,13 @@ class BaseNode:
         :param b_dir: direction of branching
         :param b_val: initial value of the branching variable
         :param depth: how deep in the tree this node is
+        :param ancestors: tuple of nodes that preceded this node (e.g. were branched
+        on to create this node)
         """
         assert isinstance(lp, CyClpSimplex), 'lp must be CyClpSimplex instance'
         assert all(0 <= idx < lp.nVariables and isinstance(idx, int) for idx in
                    integer_indices), 'indices must match variables'
-        assert isinstance(idx, int), 'node idx must be integer'
+        assert idx is None or isinstance(idx, int), 'node idx must be integer if provided'
         assert len(set(integer_indices)) == len(integer_indices), \
             'indices must be distinct'
         assert isinstance(lower_bound, float) or isinstance(lower_bound, int), \
@@ -48,6 +52,9 @@ class BaseNode:
             assert (b_dir == 'left' and good_left) or \
                    (b_dir == 'right' and good_right), 'branch val should be within 1 of both bounds'
         assert isinstance(depth, int) and depth >= 0, 'depth is a positive integer'
+        if ancestors is not None:
+            assert isinstance(ancestors, tuple), 'ancestors must be a tuple if provided'
+            assert idx not in ancestors, 'idx cannot be an ancestor of itself'
 
         lp.logLevel = 0
         self.lp = lp
@@ -68,6 +75,10 @@ class BaseNode:
         self.depth = depth
         self.search_method = 'best first'
         self.branch_method = 'most fractional'
+        self.is_leaf = True
+        ancestors = ancestors or tuple()
+        idx_tuple = (idx,) if idx is not None else tuple()
+        self.lineage = ancestors + idx_tuple or None  # test all 4 ways this can pan out
 
     def _base_bound(self: T) -> None:
         """Solve the current node with simplex to generate a bound on objective
@@ -99,7 +110,7 @@ class BaseNode:
         self._base_bound()
         return {}
 
-    def _base_branch(self: T, branch_idx: int, next_node_idx: int = 1,
+    def _base_branch(self: T, branch_idx: int, next_node_idx: int = None,
                      **kwargs: Any) -> Dict[str, T]:
         """ Creates two new copies of the node with new bounds placed on the variable
         with index <idx>, one with the variable's lower bound set to the ceiling
@@ -107,15 +118,19 @@ class BaseNode:
         the floor of its current value.
 
         :param branch_idx: index of variable to branch on
-        :param next_node_idx: index that should be assigned to the next node created
+        :param next_node_idx: index that should be assigned to the next node created.
+        If left None, assign no indices to both child nodes.
 
         :return: dict of Nodes with the new bounds keyed by direction they branched
         """
-        assert isinstance(next_node_idx, int), 'next node index should be integer'
+        assert next_node_idx is None or isinstance(next_node_idx, int), \
+            'next node index should be integer if provided'
         assert self.lp_feasible, 'must solve before branching'
         assert branch_idx in self._integer_indices, 'must branch on integer index'
         b_val = self.solution[branch_idx]
         assert self._is_fractional(b_val), "index branched on must be fractional"
+
+        self.is_leaf = False
 
         # get end basis to warm start the children
         # appears to be tuple  (variable statuses, slack statuses)
@@ -138,13 +153,20 @@ class BaseNode:
             lp.setBasisStatus(*basis)  # warm start
 
         # return instances of the subclass that calls this function
-        return {'left': type(self)(children['left'], self._integer_indices, next_node_idx,
-                                   self.objective_value, branch_idx, 'left', b_val,
-                                   self.depth + 1),
-                'right': type(self)(children['right'], self._integer_indices, next_node_idx + 1,
-                                    self.objective_value, branch_idx, 'right', b_val,
-                                    self.depth + 1),
-                'next_node_idx': next_node_idx + 2}
+        return {
+            'left': type(self)(
+                lp=children['left'], integer_indices=self._integer_indices,
+                idx=next_node_idx, lower_bound=self.objective_value, b_idx=branch_idx,
+                b_dir='left', b_val=b_val, depth=self.depth + 1, ancestors=self.lineage
+            ),
+            'right': type(self)(
+                lp=children['right'], integer_indices=self._integer_indices,
+                idx=next_node_idx + 1 if next_node_idx is not None else next_node_idx,
+                lower_bound=self.objective_value, b_idx=branch_idx, b_dir='right',
+                b_val=b_val, depth=self.depth + 1, ancestors=self.lineage
+            ),
+            'next_node_idx': next_node_idx + 2 if next_node_idx is not None else next_node_idx
+        }
 
     def _strong_branch(self: T, idx: int, iterations: int = 5) -> Dict[str, T]:
         """ Run <iterations> iterations of dual simplex starting from the
@@ -159,7 +181,8 @@ class BaseNode:
         """
         assert isinstance(iterations, int) and iterations > 0, \
             'iterations must be positive integer'
-        nodes = {k: v for k, v in self._base_branch(idx).items() if k in ['left', 'right']}
+        nodes = {k: v for k, v in self._base_branch(idx).items()
+                 if k in ['left', 'right']}
         for n in nodes.values():
             n.lp.maxNumIteration = iterations
             n.lp.dual(startFinishOptions='x')

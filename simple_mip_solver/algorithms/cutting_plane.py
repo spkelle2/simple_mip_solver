@@ -45,18 +45,18 @@ class CuttingPlane(Utils):
         while self._iterations < self._max_iters:
             self._iterations += 1
             print('Iteration: ', self._iterations)
-            self._process_rtn(self._root_node.bound())
-            print('Current bound:', self._root_node.objective_value)
-            if self._root_node.mip_feasible:
+            self._process_rtn(self.root_node.bound())
+            print('Current bound:', self.root_node.objective_value)
+            if self.root_node.mip_feasible:
                 print('Integer solution found!')
                 self.status = 'optimal'
-                self.solution = self._root_node.solution
-                self.objective_value = self._root_node.objective_value
+                self.solution = self.root_node.solution
+                self.objective_value = self.root_node.objective_value
                 break
             # if we have change in objective
-            if np.abs(self._root_node.objective_value - prev_objective_value) \
-                    >= self._root_node._epsilon:
-                prev_objective_value = self._root_node.objective_value
+            if np.abs(self.root_node.objective_value - prev_objective_value) \
+                    >= self.root_node._epsilon:
+                prev_objective_value = self.root_node.objective_value
             else:
                 print("Solution repeated, stalling detected. Exiting")
                 self.status = 'stalled'

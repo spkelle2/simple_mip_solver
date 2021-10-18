@@ -23,14 +23,14 @@ class TestUtils(unittest.TestCase):
         # check attributes
         self.assertTrue(alg._swapped_constraint_direction)
         self.assertTrue(inspect.isclass(alg._Node))
-        self.assertTrue(isinstance(alg._root_node, alg._Node))
-        self.assertTrue((alg._root_node.lp.coefMatrix == np.matrix([[-1, 0, -1], [0, -1, 0]])).all(),
+        self.assertTrue(isinstance(alg.root_node, alg._Node))
+        self.assertTrue((alg.root_node.lp.coefMatrix == np.matrix([[-1, 0, -1], [0, -1, 0]])).all(),
                         'A should flip')
-        self.assertTrue(all(alg._root_node.lp.constraintsLower == np.array([-1.5, -1.25]))
-                        and all(alg._root_node.lp.constraintsUpper >= np.array([1e300, 1e300])),
+        self.assertTrue(all(alg.root_node.lp.constraintsLower == np.array([-1.5, -1.25]))
+                        and all(alg.root_node.lp.constraintsUpper >= np.array([1e300, 1e300])),
                         'so should b')
         self.assertTrue(isinstance(alg.model, MILPInstance))
-        self.assertFalse(alg._evaluated_nodes)
+        self.assertFalse(alg.evaluated_nodes)
         self.assertTrue(alg._kwargs == {'next_node_idx': 1})
         self.assertTrue(alg._M == 999999999)
 
@@ -44,11 +44,11 @@ class TestUtils(unittest.TestCase):
         # just make sure a prob that starts >= shows that its constraints didnt change
         alg = Utils(h3p1, BaseNode, self._node_attributes, self._node_funcs)
         self.assertFalse(alg._swapped_constraint_direction)
-        self.assertTrue((alg._root_node.lp.coefMatrix ==
+        self.assertTrue((alg.root_node.lp.coefMatrix ==
                          np.matrix([[2, 5, -2, -2, 5, 5], [-2, -5, 2, 2, -5, -5]])).all(),
                         'A should flip')
-        self.assertTrue(all(alg._root_node.lp.constraintsLower == np.array([3.5, -3.5]))
-                        and all(alg._root_node.lp.constraintsUpper >= np.array([1e300, 1e300])),
+        self.assertTrue(all(alg.root_node.lp.constraintsLower == np.array([3.5, -3.5]))
+                        and all(alg.root_node.lp.constraintsUpper >= np.array([1e300, 1e300])),
                         'so should b')
 
     def test_init_fails_asserts(self):

@@ -7,6 +7,7 @@ from numpy.testing import assert_allclose
 import os
 from queue import PriorityQueue
 import re
+import sys
 import unittest
 from unittest.mock import patch
 
@@ -20,53 +21,53 @@ from test_simple_mip_solver.example_models import no_branch, small_branch, infea
 from test_simple_mip_solver import example_models
 
 
+skip_longs = True
+
+
 class TestBranchAndBoundTree(unittest.TestCase):
 
     def test_get_leaves_fails_asserts(self):
         bb = BranchAndBound(small_branch)
         bb.solve()
         self.assertRaisesRegex(AssertionError, "subtree_root_id must belong to the tree",
-                               bb._tree.get_leaves, 20)
+                               bb.tree.get_leaves, 20)
 
     def test_get_leaves(self):
         bb = BranchAndBound(small_branch)
         bb.solve()
-        leaves = bb._tree.get_leaves(0)
-        for node_id in bb._tree.nodes:
-            if node_id in leaves:
-                self.assertFalse(bb._tree.get_children(node_id))
+        leaves = bb.tree.get_leaves(0)
+        for node_id, node in bb.tree.nodes.items():
+            if node_id in [n.idx for n in  leaves]:
+                self.assertFalse(bb.tree.get_children(node_id))
             else:
-                self.assertTrue(len(bb._tree.get_children(node_id)) == 2)
-
-    def test_get_ancestors_fails_asserts(self):
-        bb = BranchAndBound(small_branch)
-        bb.solve()
-        self.assertRaisesRegex(AssertionError, "node_id must belong to the tree",
-                               bb._tree.get_ancestors, 20)
-
-    def test_get_ancestors(self):
-        bb = BranchAndBound(small_branch)
-        bb.solve()
-        self.assertTrue(bb._tree.get_ancestors(12) == [9, 7, 4, 1, 0])
+                self.assertTrue(len(bb.tree.get_children(node_id)) == 2)
 
     def test_get_node_instances_fails_asserts(self):
         bb = BranchAndBound(small_branch)
         bb.solve()
-        self.assertRaisesRegex(AssertionError, 'must be a list', bb._tree.get_node_instances, 1)
+        self.assertRaisesRegex(AssertionError, 'must be an integer or iterable',
+                               bb.tree.get_node_instances, '1')
         self.assertRaisesRegex(AssertionError, 'node_ids are not in the tree',
-                               bb._tree.get_node_instances, [20])
-        del bb._tree.nodes[0].attr['node']
+                               bb.tree.get_node_instances, [20])
+        del bb.tree.nodes[0].attr['node']
         self.assertRaisesRegex(AssertionError, 'must have an attribute for a node instance',
-                               bb._tree.get_node_instances, [0])
+                               bb.tree.get_node_instances, [0])
 
     def test_get_node_instances(self):
         bb = BranchAndBound(small_branch)
         bb.solve()
-        node1, node2 = bb._tree.get_node_instances([1, 2])
+
+        # test list
+        node1, node2 = bb.tree.get_node_instances([1, 2])
         self.assertTrue(node1.idx == 1, 'we should get node with matching id')
         self.assertTrue(isinstance(node1, BaseNode), 'we should get a node')
         self.assertTrue(node2.idx == 2, 'we should get node with matching id')
         self.assertTrue(isinstance(node2, BaseNode), 'we should get a node')
+
+        # test singleton
+        node1 = bb.tree.get_node_instances(1)
+        self.assertTrue(node1.idx == 1, 'we should get node with matching id')
+        self.assertTrue(isinstance(node1, BaseNode), 'we should get a node')
 
 
 class TestBranchAndBound(unittest.TestCase):
@@ -81,16 +82,18 @@ class TestBranchAndBound(unittest.TestCase):
     def test_init(self):
         bb = BranchAndBound(small_branch)
         self.assertTrue(isinstance(bb, Utils))
-        self.assertTrue(bb._global_upper_bound == float('inf'))
+        self.assertTrue(bb.global_upper_bound == float('inf'))
         self.assertTrue(bb._node_queue.empty())
         self.assertFalse(bb._unbounded)
         self.assertFalse(bb._best_solution)
         self.assertFalse(bb.solution)
         self.assertTrue(bb.status == 'unsolved')
         self.assertFalse(bb.objective_value)
-        self.assertTrue(isinstance(bb._tree, BranchAndBoundTree))
-        self.assertTrue(list(bb._tree.nodes.keys()) == [0])
-        self.assertTrue(bb._tree.nodes[0].attr['node'] is bb._root_node)
+        self.assertTrue(isinstance(bb.tree, BranchAndBoundTree))
+        self.assertTrue(list(bb.tree.nodes.keys()) == [0])
+        self.assertTrue(bb.tree.nodes[0].attr['node'] is bb.root_node)
+        self.assertFalse(bb.solve_time, 'solve time should exist and be 0')
+        self.assertTrue(bb.mip_gap, 'mip gap should be an attribute')
 
     def test_init_fails_asserts(self):
         bb = BranchAndBound(small_branch)
@@ -102,6 +105,38 @@ class TestBranchAndBound(unittest.TestCase):
             self.assertRaisesRegex(AssertionError, f'node_queue needs a {func} function',
                                    BranchAndBound, small_branch, BaseNode, queue)
 
+        # node limit asserts
+        self.assertRaisesRegex(AssertionError, f'node limit', BranchAndBound,
+                               model=small_branch, node_limit=-5)
+
+        # mip gap asserts
+        self.assertRaisesRegex(AssertionError, f'mip_gap', BranchAndBound,
+                               model=small_branch, mip_gap=-5)
+
+        # kwargs asserts
+        self.assertRaisesRegex(AssertionError, f'keys "right"', BranchAndBound,
+                               model=small_branch, right=-5)
+
+    def test_current_gap(self):
+        bb = BranchAndBound(small_branch, node_limit=1)
+        bb.solve()
+        self.assertTrue(bb.current_gap is None)
+        bb.node_limit = 10
+        bb.solve()
+        self.assertTrue(bb.current_gap == .125)
+        bb.node_limit = float('inf')
+        bb.solve()
+        self.assertTrue(bb.current_gap == 0)
+        print()
+
+    def test_solve_stopped_on_iterations(self):
+        # check and make sure we're good with both nodes
+        for Node in [BaseNode, PCBDFSNode]:
+            bb = BranchAndBound(small_branch, Node=Node, node_limit=1, pseudo_costs={})
+            bb.solve()
+            self.assertTrue(bb.status == 'stopped on iterations')
+            self.assertTrue(bb.solve_time)
+
     def test_solve_optimal(self):
         # check and make sure we're good with both nodes
         for Node in [BaseNode, PCBDFSNode]:
@@ -110,6 +145,7 @@ class TestBranchAndBound(unittest.TestCase):
             self.assertTrue(bb.status == 'optimal')
             self.assertTrue(all(s.is_integer for s in bb.solution))
             self.assertTrue(bb.objective_value == -2)
+            self.assertTrue(bb.solve_time)
 
     def test_solve_infeasible(self):
         # check and make sure we're good with both nodes
@@ -119,6 +155,7 @@ class TestBranchAndBound(unittest.TestCase):
             self.assertTrue(bb.status == 'infeasible')
             self.assertFalse(bb.solution)
             self.assertTrue(bb.objective_value == float('inf'))
+            self.assertTrue(bb.solve_time)
 
     def test_solve_unbounded(self):
         # check and make sure we're good with both nodes
@@ -126,6 +163,7 @@ class TestBranchAndBound(unittest.TestCase):
             bb = BranchAndBound(unbounded, Node=Node, pseudo_costs={})
             bb.solve()
             self.assertTrue(bb.status == 'unbounded')
+            self.assertTrue(bb.solve_time)
 
         # check we quit even if node_queue nonempty
         with patch.object(bb, '_evaluate_node') as en:
@@ -138,27 +176,27 @@ class TestBranchAndBound(unittest.TestCase):
         bb = BranchAndBound(unbounded, node_limit=10)
         # check we quit even if node_queue nonempty
         with patch.object(bb, '_evaluate_node') as en:
-            bb._evaluated_nodes = 10
+            bb.evaluated_nodes = 10
             bb.solve()
             self.assertFalse(en.called, 'were past the node limit')
 
     def test_evaluate_node_infeasible(self):
         bb = BranchAndBound(infeasible)
-        bb._evaluate_node(bb._root_node)
+        bb._evaluate_node(bb.root_node)
 
         # check attributes
         self.assertTrue(bb._node_queue.empty(), 'inf model should create no nodes')
         self.assertFalse(bb._best_solution, 'best solution should not change')
-        self.assertTrue(bb._global_upper_bound == float('inf'), 'shouldnt change')
-        self.assertTrue(bb._global_lower_bound == -float('inf'), 'shouldnt change')
-        self.assertTrue(bb._evaluated_nodes == 1, 'only one node should be evaluated')
+        self.assertTrue(bb.global_upper_bound == float('inf'), 'shouldnt change')
+        self.assertTrue(bb.global_lower_bound == float('inf'), 'shouldnt change')
+        self.assertTrue(bb.evaluated_nodes == 1, 'only one node should be evaluated')
 
         # check function calls - recycle object since it has attrs already set
         with patch.object(bb, '_process_rtn') as pr, \
                 patch.object(bb, '_process_branch_rtn') as pbr, \
-                patch.object(bb._root_node, 'bound') as bd, \
-                patch.object(bb._root_node, 'branch') as bh:
-            bb._evaluate_node(bb._root_node)
+                patch.object(bb.root_node, 'bound') as bd, \
+                patch.object(bb.root_node, 'branch') as bh:
+            bb._evaluate_node(bb.root_node)
             self.assertTrue(pr.call_count == 1)
             self.assertTrue(pbr.call_count == 0)
             self.assertTrue(bd.call_count == 1)
@@ -167,23 +205,23 @@ class TestBranchAndBound(unittest.TestCase):
     def test_evaluate_node_fractional(self):
         bb = BranchAndBound(small_branch, Node=PCBDFSNode, pseudo_costs={},
                             strong_branch_iters=5)
-        bb._evaluate_node(bb._root_node)
+        bb._evaluate_node(bb.root_node)
 
         # check attributes
         self.assertFalse(bb._best_solution, 'best solution should not change')
-        self.assertTrue(bb._global_upper_bound == float('inf'), 'shouldnt change')
-        self.assertTrue(bb._global_lower_bound > -float('inf'), 'should change')
+        self.assertTrue(bb.global_upper_bound == float('inf'), 'shouldnt change')
+        self.assertTrue(bb.global_lower_bound > -float('inf'), 'should change')
         self.assertTrue(bb._node_queue.qsize() == 2, 'should branch and add two nodes')
         self.assertTrue(bb._kwargs['pseudo_costs'], 'something should be set')
         self.assertTrue(bb._kwargs['strong_branch_iters'], 'something should be set')
-        self.assertTrue(bb._evaluated_nodes == 1, 'only one node should be evaluated')
+        self.assertTrue(bb.evaluated_nodes == 1, 'only one node should be evaluated')
 
         # check function calls - recycle object since it has attrs already set
         with patch.object(bb, '_process_rtn') as pr, \
                 patch.object(bb, '_process_branch_rtn') as pbr, \
-                patch.object(bb._root_node, 'bound') as bd, \
-                patch.object(bb._root_node, 'branch') as bh:
-            bb._evaluate_node(bb._root_node)
+                patch.object(bb.root_node, 'bound') as bd, \
+                patch.object(bb.root_node, 'branch') as bh:
+            bb._evaluate_node(bb.root_node)
             self.assertTrue(pr.call_count == 1)  # direct calls
             self.assertTrue(pbr.call_count == 1)
             self.assertTrue(0 == pbr.call_args.args[0], 'root node id should be first call arg')
@@ -192,21 +230,21 @@ class TestBranchAndBound(unittest.TestCase):
 
     def test_evaluate_node_integer(self):
         bb = BranchAndBound(no_branch)
-        bb._evaluate_node(bb._root_node)
+        bb._evaluate_node(bb.root_node)
 
         # check attributes
         self.assertTrue(all(bb._best_solution == [1, 1, 0]))
-        self.assertTrue(bb._global_upper_bound == -2)
-        self.assertTrue(bb._global_lower_bound == -float('inf'), 'shouldnt change')
+        self.assertTrue(bb.global_upper_bound == -2)
+        self.assertTrue(bb.global_lower_bound == -2, 'should match upper bound when optimal')
         self.assertTrue(bb._node_queue.empty(), 'immediately optimal model should create no nodes')
-        self.assertTrue(bb._evaluated_nodes == 1, 'only one node should be evaluated')
+        self.assertTrue(bb.evaluated_nodes == 1, 'only one node should be evaluated')
 
         # check function calls - recycle object since it has attrs already set
         with patch.object(bb, '_process_rtn') as pr, \
                 patch.object(bb, '_process_branch_rtn') as pbr, \
-                patch.object(bb._root_node, 'bound') as bd, \
-                patch.object(bb._root_node, 'branch') as bh:
-            bb._evaluate_node(bb._root_node)
+                patch.object(bb.root_node, 'bound') as bd, \
+                patch.object(bb.root_node, 'branch') as bh:
+            bb._evaluate_node(bb.root_node)
             self.assertTrue(pr.call_count == 1)
             self.assertTrue(pbr.call_count == 0)
             self.assertTrue(bd.call_count == 1)
@@ -214,15 +252,15 @@ class TestBranchAndBound(unittest.TestCase):
 
     def test_evaluate_node_unbounded(self):
         bb = BranchAndBound(unbounded)
-        bb._evaluate_node(bb._root_node)
+        bb._evaluate_node(bb.root_node)
 
         # check attributes
         self.assertTrue(bb._unbounded)
-        self.assertTrue(bb._evaluated_nodes == 1, 'only one node should be evaluated')
+        self.assertTrue(bb.evaluated_nodes == 1, 'only one node should be evaluated')
 
     def test_evaluate_node_properly_prunes(self):
         bb = BranchAndBound(no_branch)
-        bb._global_upper_bound = -2
+        bb.global_upper_bound = -2
         called_node = BaseNode(bb.model.lp, bb.model.integerIndices, lower_bound=-4)
         pruned_node = BaseNode(bb.model.lp, bb.model.integerIndices, lower_bound=0)
         with patch.object(called_node, 'bound') as cnb, \
@@ -236,7 +274,7 @@ class TestBranchAndBound(unittest.TestCase):
             self.assertTrue(cnb.call_count == 1, 'first node should run')
             self.assertFalse(pnb.call_count, 'second node should get pruned')
             self.assertTrue(bb._node_queue.empty())
-            self.assertTrue(bb._evaluated_nodes == 1,
+            self.assertTrue(bb.evaluated_nodes == 1,
                             'only one node should be evaluated since other pruned')
 
     def test_process_branch_rtn_fails_asserts(self):
@@ -253,7 +291,10 @@ class TestBranchAndBound(unittest.TestCase):
         self.assertRaisesRegex(AssertionError, 'must be in the returned',
                                self.bb._process_branch_rtn, 0, rtn)
         self.root_branch_rtn['right'].idx = 0
-        rtn = self.bound_root.branch(next_node_idx=0)
+
+        # test node index against rest of tree
+        rtn = self.bound_root.branch(next_node_idx=1)
+        rtn['left'].idx = 0
         self.assertRaisesRegex(AssertionError, 'give unique node ID',
                                self.bb._process_branch_rtn, 0, rtn)
 
@@ -270,13 +311,13 @@ class TestBranchAndBound(unittest.TestCase):
         self.assertTrue(isinstance(bb._node_queue.get(), BaseNode))
         self.assertTrue(isinstance(bb._node_queue.get(), BaseNode))
         self.assertTrue(bb._node_queue.empty())
-        children = bb._tree.get_children(node.idx)
+        children = bb.tree.get_children(node.idx)
         self.assertTrue(len(children) == 2, 'there should be two kids created')
         for child in children:
-            self.assertFalse(bb._tree.get_children(child), 'children shouldnt have kids')
+            self.assertFalse(bb.tree.get_children(child), 'children shouldnt have kids')
 
-        self.assertTrue(bb._tree.get_node(1).attr['node'] is left_node)
-        self.assertTrue(bb._tree.get_node(2).attr['node'] is right_node)
+        self.assertTrue(bb.tree.get_node(1).attr['node'] is left_node)
+        self.assertTrue(bb.tree.get_node(2).attr['node'] is right_node)
 
         # check function calls
         bb = BranchAndBound(small_branch)
@@ -284,8 +325,8 @@ class TestBranchAndBound(unittest.TestCase):
         node.bound()
         rtn = node.branch()
         with patch.object(bb, '_process_rtn') as pr, \
-                patch.object(bb._tree, 'add_left_child') as alc, \
-                patch.object(bb._tree, 'add_right_child') as arc:
+                patch.object(bb.tree, 'add_left_child') as alc, \
+                patch.object(bb.tree, 'add_right_child') as arc:
             bb._process_branch_rtn(0, rtn)
             self.assertTrue(pr.call_count == 1, 'should call process rtn')
             self.assertTrue(alc.call_count == 1, 'should call add left child')
@@ -302,7 +343,7 @@ class TestBranchAndBound(unittest.TestCase):
                                bb.dual_bound, CyLPArray([4.5]))
 
         bb = BranchAndBound(infeasible2)
-        bb._root_node.lp += np.matrix([[0, -1, -1]]) * bb._root_node.lp.getVarByName('x') >= CyLPArray([-2.5])
+        bb.root_node.lp += np.matrix([[0, -1, -1]]) * bb.root_node.lp.getVarByName('x') >= CyLPArray([-2.5])
         bb.solve()
         self.assertRaisesRegex(AssertionError, 'feature expects the root node to have a single constraint object',
                                bb.dual_bound, CyLPArray([2.5, 4.5]))
@@ -341,7 +382,7 @@ class TestBranchAndBound(unittest.TestCase):
         # check function calls
         bb = BranchAndBound(small_branch)
         bb.solve()
-        bound_duals = [bb._bound_dual(n.lp) for n in bb._tree.get_node_instances([6, 12, 10, 8, 2])]
+        bound_duals = [bb._bound_dual(n.lp) for n in bb.tree.get_node_instances([6, 12, 10, 8, 2])]
         with patch.object(bb, '_bound_dual') as bd:
             bd.side_effect = bound_duals
             bound = bb.dual_bound(CyLPArray([3, 3]))
@@ -354,6 +395,7 @@ class TestBranchAndBound(unittest.TestCase):
             bound = bb.dual_bound(CyLPArray([1, 1]))
             self.assertFalse(bd.called)
 
+    @unittest.skipIf(skip_longs, "debugging")
     def test_dual_bound_many_times(self):
         pattern = re.compile('evaluation_(\d+).mps')
         fldr_pth = os.path.join(os.path.dirname(os.path.abspath(inspect.getfile(example_models))),
@@ -376,9 +418,9 @@ class TestBranchAndBound(unittest.TestCase):
 
     def test_bound_dual(self):
         bb = BranchAndBound(infeasible2)
-        bb._root_node.lp += np.matrix([[0, -1, -1]]) * bb._root_node.lp.getVarByName('x') >= CyLPArray([-2.5])
+        bb.root_node.lp += np.matrix([[0, -1, -1]]) * bb.root_node.lp.getVarByName('x') >= CyLPArray([-2.5])
         bb.solve()
-        terminal_nodes = bb._tree.get_node_instances(bb._tree.get_leaves(0))
+        terminal_nodes = bb.tree.get_leaves(0)
         infeasible_nodes = [n for n in terminal_nodes if n.lp_feasible is False]
         n = infeasible_nodes[0]
         lp = bb._bound_dual(n.lp)
@@ -424,7 +466,7 @@ class TestBranchAndBound(unittest.TestCase):
     def test_bound_dual_fails_asserts(self):
         bb = BranchAndBound(infeasible)
         bb.solve()
-        terminal_nodes = bb._tree.get_node_instances(bb._tree.get_leaves(0))
+        terminal_nodes = bb.tree.get_leaves(0)
         infeasible_nodes = [n for n in terminal_nodes if n.lp_feasible is False]
         n = infeasible_nodes[0]
         n.lp.addVariable('s_0', 1)
@@ -440,7 +482,7 @@ class TestBranchAndBound(unittest.TestCase):
         self.assertRaisesRegex(AssertionError, 'parent must already exist in tree',
                                bb.find_strong_disjunctive_cut, 50)
 
-        terminal_nodes = bb._tree.get_node_instances(bb._tree.get_leaves(0))
+        terminal_nodes = bb.tree.get_leaves(0)
         disjunctive_nodes = [n for n in terminal_nodes if n.lp_feasible is not False]
         n = disjunctive_nodes[0]
         n.lp.addVariable('d', 3)
@@ -448,19 +490,54 @@ class TestBranchAndBound(unittest.TestCase):
         self.assertRaisesRegex(AssertionError, 'Each disjunctive term should have the same variables',
                                bb.find_strong_disjunctive_cut, 0)
 
+    # todo: get confirmation on bound matching
     def test_find_strong_disjunctive_cut(self):
         bb = BranchAndBound(square)
         bb.solve()
         pi, pi0 = bb.find_strong_disjunctive_cut(0)
-        assert_allclose(pi, np.array([-1, 0]), atol=.01)
-        self.assertTrue(isclose(pi0, -1))
 
-        bb = BranchAndBound(small_branch)
+        # check cut is what we expect, i.e. x1 <= 1
+        assert_allclose(pi/pi0, np.array([1, 0]), atol=.01)
+        self.assertTrue((pi - .01 < 0).all())
+        self.assertTrue(pi0 - .01 < 0)
+
+        # check we get same bound
+        A = np.append(bb.root_node.lp.coefMatrix.toarray(), [pi], axis=0)
+        b = np.append(bb.root_node.lp.constraintsLower, pi0, axis=0)
+        warm_model = MILPInstance(
+            A=A, b=b, c=bb.root_node.lp.objective, l=bb.root_node.lp.variablesLower.copy(),
+            u=bb.root_node.lp.variablesUpper.copy(), sense=['Min', '>='],
+            integerIndices=bb.root_node._integer_indices,
+            numVars=bb.root_node.lp.nVariables
+        )
+        warm_bb = BranchAndBound(warm_model)
+        warm_bb.solve()
+        # self.assertTrue(bb.global_lower_bound == warm_bb.root_node.objective_value)
+
+        # try another problem
+        bb = BranchAndBound(small_branch, node_limit=10)
         bb.solve()
         pi, pi0 = bb.find_strong_disjunctive_cut(0)
-        assert_allclose(pi, np.array([0, 0, -.5]), atol=.01)
-        self.assertTrue(isclose(pi0, -.5))
 
+        # check cut is what we expect, i.e. x3 <= 1
+        assert_allclose(pi/pi0, np.array([0, 0, 1]), atol=.01)
+        self.assertTrue((pi - .01 < 0).all())
+        self.assertTrue(pi0 - .01 < 0)
+
+        # check we get same bound
+        A = np.append(bb.root_node.lp.coefMatrix.toarray(), [pi], axis=0)
+        b = np.append(bb.root_node.lp.constraintsLower, pi0, axis=0)
+        warm_model = MILPInstance(
+            A=A, b=b, c=bb.root_node.lp.objective, l=bb.root_node.lp.variablesLower.copy(),
+            u=bb.root_node.lp.variablesUpper.copy(), sense=['Min', '>='],
+            integerIndices=bb.root_node._integer_indices,
+            numVars=bb.root_node.lp.nVariables
+        )
+        warm_bb = BranchAndBound(warm_model)
+        warm_bb.solve()
+        # self.assertTrue(bb.global_lower_bound == warm_bb.root_node.objective_value)
+
+    @unittest.skipIf(skip_longs, "debugging")
     def test_find_strong_disjunctive_cut_many_times(self):
         fldr = os.path.join(
             os.path.dirname(os.path.abspath(inspect.getfile(generate_random_variety))),
@@ -477,10 +554,10 @@ class TestBranchAndBound(unittest.TestCase):
             pi, pi0 = bb.find_strong_disjunctive_cut(0)
 
             # ensure we cut off the root solution
-            self.assertTrue(sum(pi * bb._root_node.solution) <= pi0)
+            self.assertTrue(sum(pi * bb.root_node.solution) <= pi0)
 
             # ensure we don't cut off disjunctive mins
-            for n in bb._tree.get_node_instances(bb._tree.get_leaves(0)):
+            for n in bb.tree.get_leaves(0):
                 if n.lp_feasible:
                     self.assertTrue(sum(pi * n.solution) >= pi0 - .01)
 
