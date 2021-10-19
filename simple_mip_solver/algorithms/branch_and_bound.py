@@ -2,7 +2,6 @@ import numpy as np
 from coinor.cuppy.milpInstance import MILPInstance
 from coinor.gimpy.tree import BinaryTree
 from cylp.cy.CyClpSimplex import CyClpSimplex, CyLPArray
-from math import isnan
 from queue import PriorityQueue
 import time
 from typing import Any, Dict, TypeVar, List, Tuple, Union, Iterable

@@ -278,5 +278,5 @@ square = MILPInstance(A=A, b=b, c=c, l=l, sense=['Max', '<='],
                       integerIndices=[0, 1], numVars=2)
 
 if __name__ == '__main__':
-    generate_random_variety(scale=20)
+    generate_random_variety(scale=4)
     # generate_random_value_functions()
