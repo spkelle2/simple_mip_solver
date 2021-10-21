@@ -24,7 +24,7 @@ class TestNode(TestModels):
         node = BaseNode(small_branch.lp, small_branch.integerIndices)
         self.assertTrue(node.lp, 'should get a model on proper instantiation')
         self.assertTrue(node._integer_indices == [0, 1, 2], 'should have list of integer indices')
-        self.assertTrue(node.idx == 0, 'idx should be 0')
+        self.assertFalse(node.idx, 'idx should be None')
         self.assertTrue(node._var_indices == list(range(3)), 'should have list of var indices')
         self.assertTrue(node._row_indices == list(range(2)), 'should have list of row indices')
         self.assertTrue(node.lower_bound == -float('inf'))
@@ -40,12 +40,28 @@ class TestNode(TestModels):
         self.assertFalse(node.depth, 'should have depth but 0')
         self.assertTrue(node.branch_method == 'most fractional')
         self.assertTrue(node.search_method == 'best first')
+        self.assertTrue(node.is_leaf, 'all nodes instantiate to being leaves')
+        self.assertFalse(node.lineage, 'lineage should be None')
+
+    def test_init_lineage(self):
+        node = BaseNode(small_branch.lp, small_branch.integerIndices, idx=0)
+        self.assertTrue(node.lineage == (0,))
+
+        node = BaseNode(small_branch.lp, small_branch.integerIndices, ancestors=(0,))
+        self.assertTrue(node.lineage == (0,))
+
+        node = BaseNode(small_branch.lp, small_branch.integerIndices, idx=3,
+                        ancestors=(0, 1))
+        self.assertTrue(node.lineage == (0, 1, 3))
 
     def test_init_fails_asserts(self):
         self.assertRaisesRegex(AssertionError, 'lp must be CyClpSimplex instance',
                                BaseNode, small_branch, small_branch.integerIndices)
         self.assertRaisesRegex(AssertionError, 'indices must match variables',
                                BaseNode, small_branch.lp, [4])
+        self.assertRaisesRegex(AssertionError, 'node idx must be integer',
+                               BaseNode, small_branch.lp, small_branch.integerIndices,
+                               idx=0.5)
         self.assertRaisesRegex(AssertionError, 'indices must be distinct',
                                BaseNode, small_branch.lp, [0, 1, 1])
         self.assertRaisesRegex(AssertionError, 'lower bound must be a float or an int',
@@ -68,6 +84,14 @@ class TestNode(TestModels):
                                depth=2.5)
         self.assertRaisesRegex(AssertionError, 'node idx must be integer',
                                BaseNode, small_branch.lp, small_branch.integerIndices, .5)
+        self.assertRaisesRegex(AssertionError, 'ancestors must be a tuple',
+                               BaseNode, lp=small_branch.lp,
+                               integer_indices=small_branch.integerIndices,
+                               ancestors=[0])
+        self.assertRaisesRegex(AssertionError, 'idx cannot be an ancestor of itself',
+                               BaseNode, lp=small_branch.lp,
+                               integer_indices=small_branch.integerIndices,
+                               idx=0, ancestors=(0,))
 
     def test_base_bound_integer(self):
         node = BaseNode(no_branch.lp, no_branch.integerIndices)
@@ -143,30 +167,47 @@ class TestNode(TestModels):
         node = BaseNode(small_branch.lp, small_branch.integerIndices)
         node.bound()
         idx = 2
-        rtn = node._base_branch(2, 1)
+        out = {next_node_idx: node._base_branch(2, next_node_idx) for
+               next_node_idx in [None, 1]}
+
+        # confirm current node is no longer a leaf
+        self.assertFalse(node.is_leaf)
 
         # check each node
-        for name, n in rtn.items():
-            if name not in ['left', 'right']:
-                continue
-            self.assertTrue(all(n.lp.matrix.elements == node.lp.matrix.elements))
-            self.assertTrue(all(n.lp.objective == node.lp.objective))
-            self.assertTrue(all(n.lp.constraintsLower == node.lp.constraintsLower))
-            self.assertTrue(all(n.lp.constraintsUpper == node.lp.constraintsUpper))
-            if name == 'left':
-                self.assertTrue(all(n.lp.variablesUpper == [10, 10, 1]))
-                self.assertTrue(n.lp.variablesUpper[idx] == 1)
-                self.assertTrue(all(n.lp.variablesLower == node.lp.variablesLower))
-            else:
-                self.assertTrue(all(n.lp.variablesUpper == node.lp.variablesUpper))
-                self.assertTrue(all(n.lp.variablesLower == [0, 0, 2]))
-            # check basis statuses work - i.e. are warm started
-            for i in [0, 1]:
-                self.assertTrue(all(node.lp.getBasisStatus()[i] ==
-                                    n.lp.getBasisStatus()[i]), 'bases should match')
+        for next_node_idx, rtn in out.items():
+            for name, n in rtn.items():
+                if name not in ['left', 'right']:
+                    continue
+                self.assertTrue(all(n.lp.matrix.elements == node.lp.matrix.elements))
+                self.assertTrue(all(n.lp.objective == node.lp.objective))
+                self.assertTrue(all(n.lp.constraintsLower == node.lp.constraintsLower))
+                self.assertTrue(all(n.lp.constraintsUpper == node.lp.constraintsUpper))
+                self.assertTrue(n._integer_indices == node._integer_indices)
+                self.assertTrue(n.lower_bound == node.objective_value)
+                self.assertTrue(n._b_idx == idx)
+                self.assertTrue(n._b_val == 1.5)
+                self.assertTrue(n.depth == 1)
+                if name == 'left':
+                    self.assertTrue(all(n.lp.variablesUpper == [10, 10, 1]))
+                    self.assertTrue(n.lp.variablesUpper[idx] == 1)
+                    self.assertTrue(all(n.lp.variablesLower == node.lp.variablesLower))
+                    self.assertTrue(n.lineage == (1, ) if next_node_idx else n.lineage is None)
+                    self.assertTrue(n.idx == 1 if next_node_idx else n.idx is None)
+                    self.assertTrue(n._b_dir == 'left')
+                else:
+                    self.assertTrue(all(n.lp.variablesUpper == node.lp.variablesUpper))
+                    self.assertTrue(all(n.lp.variablesLower == [0, 0, 2]))
+                    self.assertTrue(n.lineage == (2,) if next_node_idx else n.lineage is None)
+                    self.assertTrue(n.idx == 2 if next_node_idx else n.idx is None)
+                    self.assertTrue(n._b_dir == 'right')
+                # check basis statuses work - i.e. are warm started
+                for i in [0, 1]:
+                    self.assertTrue(all(node.lp.getBasisStatus()[i] ==
+                                        n.lp.getBasisStatus()[i]), 'bases should match')
 
-        # check other returns
-        self.assertTrue(rtn['next_node_idx'] == 3)
+            # check other returns
+            self.assertTrue(rtn['next_node_idx'] == 3 if next_node_idx else
+                            rtn['next_node_idx'] is None)
 
     def test_strong_branch_fails_asserts(self):
         node = BaseNode(small_branch.lp, small_branch.integerIndices, 0)

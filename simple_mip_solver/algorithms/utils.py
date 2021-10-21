@@ -1,7 +1,10 @@
 from coinor.cuppy.milpInstance import MILPInstance
 from cylp.py.utils.sparseUtil import csc_matrixPlus
 import inspect
-from typing import Any, List, TypeVar, Dict, Tuple
+from typing import Any, List, TypeVar, Dict, Type
+
+from simple_mip_solver.nodes.base_node import BaseNode
+
 
 U = TypeVar('U', bound='Utils')
 
@@ -9,10 +12,11 @@ U = TypeVar('U', bound='Utils')
 class Utils:
     """Parent class to those used to solve Mixed Integer Linear Programs. Contains
     utility functions useful across multiple classes of algorithms"""
-    def __init__(self: U, model: MILPInstance, Node: Any, node_attributes: List[str],
+    def __init__(self: U, model: MILPInstance, Node: Type[BaseNode], node_attributes: List[str],
                  node_funcs: List[str], **kwargs: Any):
         # model asserts
         assert isinstance(model, MILPInstance), 'model must be cuppy MILPInstance'
+        # todo: should have assert for single constraint in model since we assume that later on
         # cuidado: this model may have changed from what you provided. bear that in mind
         # when using its reference in the future
         self.model = self._convert_constraints_to_greq(model)
@@ -34,8 +38,8 @@ class Utils:
 
         # instantiate
         self._Node = Node
-        self._root_node = root_node
-        self._evaluated_nodes = 0
+        self.root_node = root_node
+        self.evaluated_nodes = 0
         kwargs['next_node_idx'] = 1  # put in kwargs so node methods can update this number
         self._kwargs = kwargs
         self._M = 999999999

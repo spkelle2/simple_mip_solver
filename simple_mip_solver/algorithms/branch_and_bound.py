@@ -3,7 +3,8 @@ from coinor.cuppy.milpInstance import MILPInstance
 from coinor.gimpy.tree import BinaryTree
 from cylp.cy.CyClpSimplex import CyClpSimplex, CyLPArray
 from queue import PriorityQueue
-from typing import Any, Dict, TypeVar, List, Tuple
+import time
+from typing import Any, Dict, TypeVar, List, Tuple, Union, Iterable
 
 from simple_mip_solver.algorithms.utils import Utils
 from simple_mip_solver.nodes.base_node import BaseNode, T
@@ -18,44 +19,32 @@ BT = TypeVar('BT', bound='BranchAndBoundTree')
 class BranchAndBoundTree(BinaryTree):
     """Class used to represent the underlying tree structure of branch and bound"""
 
-    def get_leaves(self: BT, subtree_root_id: int) -> List[int]:
+    def get_leaves(self: BT, subtree_root_id: int) -> List[BaseNode]:
         """ Gather all leaves of a subtree rooted at node with id <subtree_root_id>
 
         :param subtree_root_id: The id of the node that roots our subtree
         :return: the leaves of the subtree
         """
         assert subtree_root_id in self, 'subtree_root_id must belong to the tree'
-        leaves = []
-        if not self.neighbors[subtree_root_id]:
-            leaves.append(subtree_root_id)
-        else:
-            for child_id in self.get_children(subtree_root_id):
-                leaves.extend(self.get_leaves(child_id))
-        return leaves
-
-    def get_ancestors(self: BT, node_id: int) -> List[int]:
-        """ Gather all ancestors for a given node with id <node_id>
-
-        :param node_id: node to gather ancestors for
-        :return: list of node's ancestors
-        """
-        assert node_id in self, 'node_id must belong to the tree'
-        ancestors = []
-        parent_id = self.get_parent(node_id)
-        if parent_id is not None:
-            ancestors.append(parent_id)
-            ancestors.extend(self.get_ancestors(parent_id))
-        return ancestors
+        return [n.attr['node'] for n in self.nodes.values() if n.attr['node'].is_leaf
+                and subtree_root_id in n.attr['node'].lineage]
 
     # make this work with just one node passed
-    def get_node_instances(self: BT, node_ids: List[int]) -> List[T]:
-        assert isinstance(node_ids, list), 'node_ids must be a list'
+    def get_node_instances(self: BT, node_ids: Union[int, Iterable[int]]) -> List[BaseNode]:
+        is_int = False
+        if isinstance(node_ids, int):
+            is_int = True
+            node_ids = [node_ids]
+        else:
+            assert isinstance(node_ids, Iterable) and not isinstance(node_ids, str), \
+                'node_ids must be an integer or iterable (that is not a string)'
+            node_ids = list(node_ids)
         missing_ids = set(node_ids) - set(self.nodes)
         assert not missing_ids, f'the following node_ids are not in the tree: {missing_ids}'
         instances = [self.nodes[idx].attr.get('node') for idx in node_ids]
         assert all(instance is not None for instance in instances), \
             'each vertex in the branch and bound tree must have an attribute for a node instance'
-        return instances
+        return instances if not is_int else instances[0]
 
 
 class BranchAndBound(Utils):
@@ -71,7 +60,8 @@ class BranchAndBound(Utils):
     # these kwargs get passed to the branch and bound functions
     # so **kwargs = {'strong_branch_iters': 5, 'pseudo_costs': {}}
     def __init__(self: B, model: MILPInstance, Node: Any = BaseNode,
-                 node_queue: Any = None, node_limit: int = float('inf'), **kwargs: Any):
+                 node_queue: Any = None, node_limit: int = float('inf'),
+                 mip_gap: float = .0001, **kwargs: Any):
         f""" Instantiates a Branch and Bound instance.
         
         :param model: A MILPInstance object that defines the MILP we solve
@@ -99,8 +89,11 @@ class BranchAndBound(Utils):
             assert callable(c), f'node_queue needs a {func} function'
 
         # node_limit assert
-        assert node_limit == float('inf') or isinstance(node_limit, int), \
-            "node limit must be integer or infinity"
+        assert node_limit == float('inf') or (isinstance(node_limit, int) and node_limit > 0), \
+            "node limit must be positive integer or infinity"
+
+        # mip_gap assert
+        assert 0 <= mip_gap < 1, 'mip_gap is a ratio between 0 and 1'
 
         # kwargs assert
         assert set(kwargs.keys()).isdisjoint({'right', 'left'}), \
@@ -114,11 +107,25 @@ class BranchAndBound(Utils):
         self.solution = None
         self.status = 'unsolved'
         self.objective_value = None
-        self._global_upper_bound = float('inf')
-        self._global_lower_bound = -float('inf')
-        self._node_limit = node_limit
-        self._tree = BranchAndBoundTree()
-        self._tree.add_root(self._root_node.idx, node=self._root_node)
+        self.global_upper_bound = float('inf')
+        self.global_lower_bound = -float('inf')
+        self.node_limit = node_limit
+        self.tree = BranchAndBoundTree()
+        self.tree.add_root(self.root_node.idx, node=self.root_node)
+        self.solve_time = 0
+        self.mip_gap = mip_gap
+
+    @property
+    def current_gap(self):
+        if self.global_upper_bound == self.global_lower_bound == 0:
+            gap = 0
+        elif self.global_upper_bound == 0:
+            gap = float('inf')
+        elif self.global_upper_bound == float('inf'):
+            gap = None
+        else:
+            gap = abs(self.global_upper_bound - self.global_lower_bound)/abs(self.global_upper_bound)
+        return gap
 
     def solve(self: B) -> None:
         """Solves the Branch and Bound algorithm using the bound, search, and
@@ -127,18 +134,23 @@ class BranchAndBound(Utils):
 
         :return:
         """
-        assert self.status == 'unsolved', "This instance is solved. Please " \
-                                          "create a new instance to resolve"
-        self._node_queue.put(self._root_node)
+        start = time.process_time()
+        if self.status == 'unsolved':
+            self._node_queue.put(self.root_node)
 
         while not (self._node_queue.empty() or self._unbounded or
-                   self._evaluated_nodes >= self._node_limit):
+                   self.evaluated_nodes >= self.node_limit or
+                   (self.current_gap is not None and self.current_gap <= self.mip_gap)):
             self._evaluate_node(self._node_queue.get())
 
-        self.status = 'unbounded' if self._unbounded else 'optimal' if \
-            self._best_solution is not None else 'infeasible'
+        run_time = time.process_time() - start
+        self.solve_time += run_time
+        self.status = 'unbounded' if self._unbounded else 'infeasible' if \
+            self._node_queue.empty() and self.global_upper_bound == float('inf') else \
+            'optimal' if self.global_upper_bound < float('inf') and self.current_gap <= self.mip_gap \
+            else 'stopped on iterations'
         self.solution = self._best_solution
-        self.objective_value = self._global_upper_bound
+        self.objective_value = self.global_upper_bound
 
     def _evaluate_node(self: B, node: T) -> None:
         """Bounds and optionally branches on the given node. Updates any attributes
@@ -147,24 +159,25 @@ class BranchAndBound(Utils):
         :param node: the object that is bounded and potentially branched on.
         :return:
         """
-        if node.lower_bound >= self._global_upper_bound:
-            return
-        self._evaluated_nodes += 1
+        if node.lower_bound < self.global_upper_bound:
+            self.evaluated_nodes += 1
 
-        self._process_rtn(node.bound(**self._kwargs))
+            self._process_rtn(node.bound(**self._kwargs))
 
-        # this solver is not designed to handle unboundedness accurately
-        # need feasible milp solution, but may never find one, so assumes we do
-        if node.unbounded:
-            self._unbounded = True
+            # this solver is not designed to handle unboundedness accurately
+            # need feasible milp solution, but may never find one, so assumes we do
+            if node.unbounded:
+                self._unbounded = True
 
-        if node.lp_feasible and node.objective_value < self._global_upper_bound:
-            if node.mip_feasible:
-                self._best_solution = node.solution
-                self._global_upper_bound = node.objective_value
-            else:
-                self._process_branch_rtn(node.idx, node.branch(**self._kwargs))
-                self._global_lower_bound = min(n.lower_bound for n in self._node_queue.queue)
+            if node.lp_feasible and node.objective_value < self.global_upper_bound:
+                if node.mip_feasible:
+                    self._best_solution = node.solution
+                    self.global_upper_bound = node.objective_value
+                else:
+                    self._process_branch_rtn(node.idx, node.branch(**self._kwargs))
+
+        self.global_lower_bound = min([n.lower_bound for n in self._node_queue.queue] +
+                                      [self.global_upper_bound])
 
     def _process_branch_rtn(self: B, parent_id: int, rtn: Dict[str, Any]):
         """ Pull the nodes returned from branching out of the rtn dict and into
@@ -176,20 +189,20 @@ class BranchAndBound(Utils):
         """
         assert isinstance(rtn, dict), 'rtn must be a dictionary'
         assert isinstance(parent_id, int), 'parent_id must be integer'
-        assert parent_id in self._tree, 'parent must already exist in tree'
+        assert parent_id in self.tree, 'parent must already exist in tree'
         # left is down right is up
         for direction in ['left', 'right']:
             assert direction in rtn, f'{direction} must be in the returned dict'
             assert isinstance(rtn[direction], self._Node), \
                 f'{direction} value must be type {type(self._Node)}'
-            assert rtn[direction].idx not in self._tree, 'please give unique node ID'
+            assert rtn[direction].idx not in self.tree, 'please give unique node ID'
             self._node_queue.put(rtn[direction])
-            getattr(self._tree, f'add_{direction}_child')(rtn[direction].idx, parent_id,
-                                                          node=rtn[direction])
+            getattr(self.tree, f'add_{direction}_child')(rtn[direction].idx, parent_id,
+                                                         node=rtn[direction])
             del rtn[direction]
         self._process_rtn(rtn)
 
-    # todo: refactor for multiple constraints
+    # todo: refactor for multiple constraints and get rid of change in b
     # entrust the user to better know what they're doing using this function with cuts added
     # enforce above that branching is done by bounding variables and not adding constraints
     # i don't even think we need that enforcement because it would be cpatured in a constraint
@@ -204,7 +217,7 @@ class BranchAndBound(Utils):
         """
         assert isinstance(b, CyLPArray), 'this function only works with CyLP arrays'
         assert self.status != 'unsolved', 'must solve this instance before using this method'
-        terminal_nodes = self._tree.get_node_instances(self._tree.get_leaves(self._root_node.idx))
+        terminal_nodes = self.tree.get_leaves(self.root_node.idx)
         multi_const_nodes = [n.idx for n in terminal_nodes if len(n.lp.constraints) != 1]
         assert not multi_const_nodes, \
             f'This feature expects the root node to have a single constraint object and ' \
@@ -213,8 +226,10 @@ class BranchAndBound(Utils):
             f'IDs belong to nodes that do not conform to these rules: {multi_const_nodes}'
         assert all(b.shape == n.lp.constraints[0].lower.shape for n in terminal_nodes), \
             'the shape of the RHS being added should match that of each node'
-        
-        b = -b if self._swapped_constraint_direction else b
+        if self._swapped_constraint_direction:
+            b = -b
+            print('WARNING: your rhs was made negative to reflect constraints'
+                  ' flipping direction at instantiation')
         # note: after first call, this routine will not bound duals again since they already are
         # also does not update other attributes of the node to reflect its values from solve
         infeasible_nodes = [n for n in terminal_nodes if n.lp.getStatusCode() == 1]
@@ -228,12 +243,11 @@ class BranchAndBound(Utils):
         # LB for for each ancestor node, they are also LB's for terminal node
         bounds = {}
         for node in terminal_nodes:
-            lineage = [node] + self._tree.get_node_instances(self._tree.get_ancestors(node.idx))
             bounds[node.idx] = max(
                 np.inner(n.lp.dualConstraintSolution[n.lp.constraints[0].name], b) +
                 np.inner(np.maximum(np.concatenate([sol for sol in n.lp.dualVariableSolution.values()]), np.zeros(n.lp.nVariables)), n.lp.variablesLower) +
                 np.inner(np.minimum(np.concatenate([sol for sol in n.lp.dualVariableSolution.values()]), np.zeros(n.lp.nVariables)), n.lp.variablesUpper)
-                for n in lineage
+                for n in self.tree.get_node_instances(node.lineage)
             )
         return min(bounds.values())
 
@@ -310,10 +324,10 @@ class BranchAndBound(Utils):
         the convex hull of the disjunctive terms' LP relaxations
         """
         # sanity checks
-        assert root_id in self._tree, 'parent must already exist in tree'
-        root = self._tree.get_node_instances([root_id])[0]
+        assert root_id in self.tree, 'parent must already exist in tree'
+        root = self.tree.get_node_instances(root_id)
         # get each disjunctive term
-        terminal_nodes = self._tree.get_node_instances(self._tree.get_leaves(root_id))
+        terminal_nodes = self.tree.get_leaves(root_id)
         # terminal nodes pruned for infeasibility do not expand disjunction, so remove them
         disjunctive_nodes = {n.idx: n for n in terminal_nodes if n.lp_feasible is not False}
         var_dicts = [{v.name: v.dim for v in n.lp.variables} for n in disjunctive_nodes.values()]

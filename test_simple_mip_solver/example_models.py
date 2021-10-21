@@ -25,9 +25,9 @@ def generate_random_MILPInstance(numVars=40, numCons=20, density=0.2,
                         integerIndices=list(range(len(vs))), numVars=len(vs))
 
 
-def generate_random_variety():
-    constraints = {2: 'low', 4: 'high'}
-    variables = {2: 'low', 4: 'high'}
+def generate_random_variety(scale=1):
+    constraints = {2*scale: 'low', 4*scale: 'high'}
+    variables = {2*scale: 'low', 4*scale: 'high'}
     densities = {.2: 'low', .8: 'high'}
     max_obj_coeffs = {10: 'low', 100: 'high'}
     max_cons_coeffs = {10: 'low', 100: 'high'}
@@ -278,5 +278,5 @@ square = MILPInstance(A=A, b=b, c=c, l=l, sense=['Max', '<='],
                       integerIndices=[0, 1], numVars=2)
 
 if __name__ == '__main__':
-    # generate_random_variety()
-    generate_random_value_functions()
+    generate_random_variety(scale=4)
+    # generate_random_value_functions()

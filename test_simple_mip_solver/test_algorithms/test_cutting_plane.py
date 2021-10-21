@@ -37,7 +37,7 @@ class TestNode(unittest.TestCase):
         cp = CuttingPlane(self.cut1_std)
         cp.solve()
         self.assertTrue(cp.status == 'optimal')
-        self.assertTrue(np.max(np.abs(cp.solution - np.array([7, 5]))) < cp._root_node._epsilon)
+        self.assertTrue(np.max(np.abs(cp.solution - np.array([7, 5]))) < cp.root_node._epsilon)
         self.assertTrue(isclose(cp.objective_value, -5, abs_tol=.01))
 
 
