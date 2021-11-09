@@ -1,0 +1,204 @@
+from cylp.cy.CyClpSimplex import CyClpSimplex, CyLPArray
+import numpy as np
+from typing import Tuple, TypeVar, Iterable, Union
+
+from simple_mip_solver import BranchAndBound
+from simple_mip_solver.utils import epsilon
+
+CGLP = TypeVar('CGLP', bound='CutGeneratingLP')
+
+
+# add this as an attribute to each CuttingPlaneNode
+# If not updating constraints or bounds, just copy the CGLP object during branching
+# else create a new CGLP during branching
+# in either case, set current basis as starting_basis attribute to CuttingPlaneNode children
+# maybe make node_kwargs argument that can be passed to branching for init idk
+class CutGeneratingLP:
+
+    def __init__(self: CGLP, bb: BranchAndBound, root_id: int, A: np.matrix = None,
+                 b: CyLPArray = None, var_lb: CyLPArray = None, var_ub: CyLPArray = None):
+        """ Creates an object that can generate a strong cut valid for the
+        disjunction encoded in the subtree of <bb> rooted at node <root_id> by
+        solving what is called the Cut Generating LP (CGLP).
+        This cut by default is optimized to maximize the violation of the LP
+        relaxation solution at node <root_id>, although this can be overwritten
+        in the solve subroutine.
+
+        :param bb: branch and bound tree from which we recover the disjunction
+        :param root_id: id of the node off which we will base the disjunction
+        :return: a CGLP instance
+        """
+        # sanity checks
+        assert isinstance(bb, BranchAndBound), 'bb must be a BranchAndBound instance'
+        assert root_id in bb.tree, 'root node of the disjunction must be present in B & B tree'
+
+        self.bb = bb
+        self.root_id = root_id
+        self.lp = self._create_cglp(A, b, var_lb, var_ub)
+
+    # test by making sure we get the coef matrix, bounds, and objective we would expect for the given inputs
+    # for passing nothing, coef matrix, and bounds
+    def _create_cglp(self, A: np.matrix = None, b: CyLPArray = None,
+                     var_lb: CyLPArray = None, var_ub: CyLPArray = None) -> CyClpSimplex:
+        """ Create the cut generating LP, optionally overriding the constraints
+        or variable bounds of the disjunctive terms' LP relaxations.
+
+        See ISE 418 Lecture 13 slide 3, Lecture 14 slide 9, and Lecture 15 slides
+        6-7 for derivation of LP in the model object constructed below
+
+        :param A: The coefficient matrix to use for each disjunctive term's LP
+        relaxation. If None, each disjunctive term will use its existing LP relaxation's
+        coefficient matrix
+        :param b: The RHS to be used for the constraints (assumed to be Ax >= b)
+        in each disjunctive term's LP relaxation. If None, each disjunctive term
+        will use its existing LP relaxation's RHS
+        :param var_lb: Lower bound to place on the variables in each disjunctive term.
+        If provided, the lower bound on each disjunctive term's variables is updated
+        to be max(var_lb, <current lb>). If not, lower bounds are unchanged.
+        :param var_ub: Upper bound to place on the variables in each disjunctive term.
+        If provided, the upper bound on each disjunctive term's variables is updated
+        to be min(var_ub, <current ub>). If not, upper bounds are unchanged.
+        :return: CyClpSimplex instance representing the CGLP
+        """
+
+        # get each disjunctive term
+        terminal_nodes = self.bb.tree.get_leaves(self.root_id)
+        # terminal nodes pruned for infeasibility do not expand disjunction, so remove them
+        disjunctive_nodes = {n.idx: n for n in terminal_nodes if n.lp_feasible is not False}
+        var_dicts = [{v.name: v.dim for v in n.lp.variables} for n in disjunctive_nodes.values()]
+        assert all(var_dicts[0] == d for d in var_dicts), \
+            'Each disjunctive term should have the same variables. The feature allowing' \
+            ' otherwise remains to be developed.'
+
+        # useful constants
+        num_vars = sum(var_dim for var_dim in var_dicts[0].values())
+        root = self.bb.tree.get_node_instances(self.root_id)
+        inf = root.lp.getCoinInfinity()
+
+        # sanity checks
+        assert (A is None and b is None) or (A is not None and b is not None), \
+            "A and b must both have values or must both be None"
+        if A is not None:
+            assert isinstance(A, np.matrix), "A must be a numpy matrix"
+            assert A.shape[1] == num_vars, \
+                "A must have same number of columns as each disjunctive term has variables"
+        if b is not None:
+            assert isinstance(b, CyLPArray), "b must be a CyLPArray"
+            assert b.shape == (A.shape[0],), "A must have the same number of rows " \
+                                             "as b has entries"
+        if var_lb is not None:
+            assert isinstance(var_lb, CyLPArray), "var_lb must be a CyLPArray"
+            assert var_lb.shape == (num_vars,), "Must have same number of lower bounds as variables"
+        else:
+            var_lb = CyLPArray([-float('inf')] * num_vars)
+        if var_ub is not None:
+            assert isinstance(var_ub, CyLPArray), "var_ub must be a CyLPArray"
+            assert var_ub.shape == (num_vars,), "Must have same number of upper bounds as variables"
+        else:
+            var_ub = CyLPArray([float('inf')] * num_vars)
+
+        # set coefficients and bounds on variables in CGLP related to variable bounds in disjunction
+        lb, ub, wb, vb = {}, {}, {}, {}
+        for idx, n in list(disjunctive_nodes.items()):
+            l = np.maximum(n.lp.variablesLower, var_lb)
+            u = np.minimum(n.lp.variablesUpper, var_ub)
+            if any(l > u):
+                # this disjunctive term will be infeasible with new bounds, so remove it
+                del disjunctive_nodes[idx]
+            else:
+                # collect the coefficients for columns of constraints arising from variable bounds
+                # set coefficients to 0 when the variable is unbounded to avoid numerical errors in solver
+                # adjusted lower bound from disjunction
+                lb[idx] = CyLPArray([val if val > -inf else 0 for val in l])
+                # adjusted upper bound from disjunction
+                ub[idx] = CyLPArray([val if val < inf else 0 for val in u])
+
+                # set corresponding variables in cglp to 0 to reflect there is no bound
+                # i.e. this variable should not exist in cglp
+                # bound on w - variable pertaining to lb constraints in disjunction
+                wb[idx] = CyLPArray([inf if val > -inf else 0 for val in l])
+                # bound on v - variable pertaining to ub constraints in disjunction
+                vb[idx] = CyLPArray([inf if val < inf else 0 for val in u])
+
+        # create dicts to hold coef matrices and rhs's
+        constrs = {idx: {'A': A if A is not None else n.lp.coefMatrix,
+                         'b': b if b is not None else CyLPArray(n.lp.constraintsLower)}
+                   for idx, n in disjunctive_nodes.items()}
+
+        # instantiate LP
+        lp = CyClpSimplex()
+        lp.logLevel = 0  # quiet output when resolving
+
+        # declare variables
+        pi = lp.addVariable('pi', num_vars)
+        pi0 = lp.addVariable('pi0', 1)
+        u = {idx: lp.addVariable(f'u_{idx}', constr['b'].size) for idx, constr in
+             constrs.items()}  # one variable for each constraint in each disjunctive term
+        w = {idx: lp.addVariable(f'w_{idx}', n.lp.nVariables) for idx, n in
+             disjunctive_nodes.items()}
+        v = {idx: lp.addVariable(f'v_{idx}', n.lp.nVariables) for idx, n in
+             disjunctive_nodes.items()}
+
+        # bound them
+        for idx in disjunctive_nodes:
+            lp += u[idx] >= 0
+            lp += 0 <= w[idx] <= wb[idx]
+            lp += 0 <= v[idx] <= vb[idx]
+
+        # add constraints
+        for i, constr in constrs.items():
+            # (pi, pi0) must be valid for each disjunctive term's LP relaxation
+            lp += 0 >= -pi + constr['A'].T * u[i] + np.matrix(np.eye(num_vars)) * w[i] - \
+                  np.matrix(np.eye(num_vars)) * v[i]
+            lp += 0 <= -pi0 + constr['b'] * u[i] + lb[i] * w[i] - ub[i] * v[i]
+        # normalize variables so they don't grow arbitrarily
+        lp += sum(var.sum() for var_dict in [u, w, v] for var in var_dict.values()) == 1
+
+        # set objective: find the deepest cut
+        # since pi * x >= pi0 for all x in disjunction, we want min pi * x_star - pi0
+        lp.objective = CyLPArray(root.solution) * pi - pi0
+
+        return lp
+
+    def solve(self: CGLP, x_star: CyLPArray = None,
+              starting_basis: Tuple[np.ndarray, np.ndarray] = None) -> \
+            Tuple[Union[CyLPArray, None], Union[float, None]]:
+        """ Finds the valid inequality that maximally separates x_star from the convex
+        hull of the LP relaxations of each disjunctive term of the branch and bound
+        tree within <self.bb>.
+
+        :param x_star: The point we want to cut off. If None, the CGLP will find a valid
+        inequality that maximizes the separation of the solution of the LP relaxation
+        of the node which had its ID provided at initialization.
+        :return: a valid inequality (pi, pi0), i.e. pi^T x >= pi0 for all x in
+        the convex hull of the disjunctive terms' LP relaxations
+        """
+
+        if x_star is not None:
+            pi, pi0 = self.lp.getVarByName('pi'), self.lp.getVarByName('pi0')
+            assert isinstance(x_star, CyLPArray), 'x_star must be a CyLPArray'
+            assert x_star.shape == (pi.dim,), \
+                'x_star must have the same number of variables as the LP relaxations ' \
+                'in the branch and bound tree this instance was created with'
+            self.lp.objective = x_star * pi - pi0
+        if starting_basis is not None:
+            assert isinstance(starting_basis, Iterable) and not isinstance(starting_basis, str) \
+                and len(starting_basis) == 2, 'starting basis must be an iterable with two elements'
+            for status_array in starting_basis:
+                assert isinstance(status_array, Iterable) and not isinstance(status_array, str), \
+                    'elements of starting basis must be iterables'
+            assert starting_basis[0].shape == (self.lp.nVariables,), \
+                'first starting_basis element should give status for exactly each decision variable in CGLP'
+            assert starting_basis[1].shape == (self.lp.nConstraints,), \
+                'second starting_basis element should give status for exactly each slack variable in CGLP'
+            self.lp.setBasisStatus(*starting_basis)
+
+        # solve
+        self.lp.dual(startFinishOptions='x')
+        assert self.lp.getStatusCode() == 0, 'we should get optimal solution'
+
+        # if we find a cut that separates x_star from the disjunction
+        if self.lp.objectiveValue <= epsilon:
+            return self.lp.primalVariableSolution['pi'], self.lp.primalVariableSolution['pi0'][0]
+        else:
+            return None, None
