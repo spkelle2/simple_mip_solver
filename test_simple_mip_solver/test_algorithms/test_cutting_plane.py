@@ -5,7 +5,7 @@ import numpy as np
 import unittest
 
 from simple_mip_solver import CuttingPlane
-from simple_mip_solver.algorithms.utils import Utils
+from simple_mip_solver.algorithms.base_algorithm import BaseAlgorithm
 from test_simple_mip_solver.example_models import cut1, infeasible, unbounded, cut2
 
 
@@ -17,12 +17,12 @@ class TestNode(unittest.TestCase):
                         'infeasible_std': infeasible, 'unbounded': unbounded}.items():
             new_m = MILPInstance(A=m.A, b=m.b, c=m.lp.objective, l=m.l, sense=['Min', m.sense],
                                  integerIndices=m.integerIndices, numVars=len(m.lp.objective))
-            new_m = Utils._convert_constraints_to_greq(new_m)
+            new_m = BaseAlgorithm._convert_constraints_to_greq(new_m)
             setattr(self, name, new_m)
 
     def test_init(self):
         cp = CuttingPlane(self.cut1_std)
-        self.assertTrue(isinstance(cp, Utils))
+        self.assertTrue(isinstance(cp, BaseAlgorithm))
         self.assertTrue(cp._max_iters)
         self.assertFalse(cp._iterations)
         self.assertFalse(cp.solution)

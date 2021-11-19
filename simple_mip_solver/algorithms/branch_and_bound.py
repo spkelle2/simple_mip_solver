@@ -2,12 +2,13 @@ import numpy as np
 from coinor.cuppy.milpInstance import MILPInstance
 from coinor.gimpy.tree import BinaryTree
 from cylp.cy.CyClpSimplex import CyClpSimplex, CyLPArray
+from cylp.py.modeling import CyLPExpr
 from queue import PriorityQueue
 import time
-from typing import Any, Dict, TypeVar, List, Tuple, Union, Iterable
+from typing import Any, Dict, TypeVar, List, Union, Iterable, Type
 
-from simple_mip_solver.algorithms.utils import Utils
-from simple_mip_solver.nodes.base_node import BaseNode, T
+from simple_mip_solver.algorithms.base_algorithm import BaseAlgorithm
+from simple_mip_solver.nodes.base_node import BaseNode
 from simple_mip_solver.nodes.branch.pseudo_cost import PseudoCostBranchNode
 from test_simple_mip_solver.example_models import small_branch
 
@@ -47,7 +48,7 @@ class BranchAndBoundTree(BinaryTree):
         return instances if not is_int else instances[0]
 
 
-class BranchAndBound(Utils):
+class BranchAndBound(BaseAlgorithm):
     """Class used to solve Mixed Integer Linear Programs with the Branch and
     Bound algorithm"""
 
@@ -58,8 +59,8 @@ class BranchAndBound(Utils):
     _queue_funcs = ['put', 'get', 'empty']
 
     # these kwargs get passed to the branch and bound functions
-    # so **kwargs = {'strong_branch_iters': 5, 'pseudo_costs': {}}
-    def __init__(self: B, model: MILPInstance, Node: Any = BaseNode,
+    # so kwargs = {'strong_branch_iters': 5, 'pseudo_costs': {}}
+    def __init__(self: B, model: MILPInstance, Node: Type[BaseNode] = BaseNode,
                  node_queue: Any = None, node_limit: int = float('inf'),
                  mip_gap: float = .0001, **kwargs: Any):
         f""" Instantiates a Branch and Bound instance.
@@ -96,8 +97,9 @@ class BranchAndBound(Utils):
         assert 0 <= mip_gap < 1, 'mip_gap is a ratio between 0 and 1'
 
         # kwargs assert
-        assert set(kwargs.keys()).isdisjoint({'right', 'left'}), \
-            'keys "right" and "left" are saved for later use'
+        special_keys = {'right', 'left', 'cuts'}
+        assert set(kwargs.keys()).isdisjoint(special_keys), \
+            f'keys {special_keys} are saved for later use'
         assert all(isinstance(k, str) for k in kwargs), 'kwargs keys must be strings'
 
         # instantiate
@@ -152,9 +154,10 @@ class BranchAndBound(Utils):
         self.solution = self._best_solution
         self.objective_value = self.global_upper_bound
 
-    def _evaluate_node(self: B, node: T) -> None:
+    def _evaluate_node(self: B, node: BaseNode) -> None:
         """Bounds and optionally branches on the given node. Updates any attributes
-        with the values keyed in the rtn's for bound and branch methods.
+        with the values keyed in the rtn's for bound and branch methods. Updates
+        the global lower bound
 
         :param node: the object that is bounded and potentially branched on.
         :return:
@@ -162,7 +165,7 @@ class BranchAndBound(Utils):
         if node.lower_bound < self.global_upper_bound:
             self.evaluated_nodes += 1
 
-            self._process_rtn(node.bound(**self._kwargs))
+            self._process_bound_rtn(node.bound(**self._kwargs))
 
             # this solver is not designed to handle unboundedness accurately
             # need feasible milp solution, but may never find one, so assumes we do
@@ -202,7 +205,28 @@ class BranchAndBound(Utils):
             del rtn[direction]
         self._process_rtn(rtn)
 
+    def _process_bound_rtn(self: B, rtn: Dict[str, Any]):
+        """ Pull the cuts returned from bounding out of the rtn dict and add
+        to all nodes in the node queue before updating the rest of the key value
+        pairs in _kwargs
+
+        :param rtn:
+        :return:
+        """
+        assert isinstance(rtn, dict), 'rtn must be a dictionary'
+        cuts = rtn.get('cuts')
+        if cuts:
+            assert isinstance(cuts, Iterable), 'cuts must be iterable'
+            for cut in cuts:
+                assert isinstance(cut, CyLPExpr), 'each cut must be a CyLPExpr'
+                for node in self._node_queue.queue:
+                    node.lp.addConstraint(cut)
+            del rtn['cuts']
+        self._process_rtn(rtn)
+
     # todo: refactor for multiple constraints and get rid of change in b
+    # todo: accomplish b work by just requiring all models entered in min c^T x : Ax >= b
+    # todo: then just flip all the example models
     # entrust the user to better know what they're doing using this function with cuts added
     # enforce above that branching is done by bounding variables and not adding constraints
     # i don't even think we need that enforcement because it would be cpatured in a constraint
@@ -310,90 +334,6 @@ class BranchAndBound(Utils):
         # rerun and reassign
         new_lp.dual(startFinishOptions='x')
         return new_lp
-
-    def find_strong_disjunctive_cut(self, root_id: int) -> Tuple[CyLPArray, float]:
-        """ Generate a strong cut valid for the disjunction encoded in the subtree
-        rooted at node <root_id>. This cut is optimized to maximize the violation
-        of the LP relaxation solution at node <root_id>
-
-        see ISE 418 Lecture 13 slide 3, Lecture 14 slide 9, and Lecture 15 slides
-        6-7 for derivation
-
-        :param root_id: id of the node off which we will base the disjunction
-        :return: a valid inequality (pi, pi0), i.e. pi^T x >= pi0 for all x in
-        the convex hull of the disjunctive terms' LP relaxations
-        """
-        # sanity checks
-        assert root_id in self.tree, 'parent must already exist in tree'
-        root = self.tree.get_node_instances(root_id)
-        # get each disjunctive term
-        terminal_nodes = self.tree.get_leaves(root_id)
-        # terminal nodes pruned for infeasibility do not expand disjunction, so remove them
-        disjunctive_nodes = {n.idx: n for n in terminal_nodes if n.lp_feasible is not False}
-        var_dicts = [{v.name: v.dim for v in n.lp.variables} for n in disjunctive_nodes.values()]
-        assert all(var_dicts[0] == d for d in var_dicts), \
-            'Each disjunctive term should have the same variables. The feature allowing' \
-            ' otherwise remains to be developed.'
-
-        # useful constants
-        num_vars = sum(var_dim for var_dim in var_dicts[0].values())
-        inf = root.lp.getCoinInfinity()
-
-        # set infinite lower/upper bounds to 0 so they don't create numerical issues in constraints
-        lb = {idx: CyLPArray([val if val > -inf else 0 for val in n.lp.variablesLower])
-              for idx, n in disjunctive_nodes.items()}  # adjusted lower bound
-        ub = {idx: CyLPArray([val if val < inf else 0 for val in n.lp.variablesUpper])
-              for idx, n in disjunctive_nodes.items()}  # adjusted upper bound
-
-        # set corresponding variables in cglp to 0 to reflect there is no bound
-        # i.e. this variable should not exist in cglp
-        wb = {idx: CyLPArray([inf if val > -inf else 0 for val in n.lp.variablesLower])
-              for idx, n in disjunctive_nodes.items()}  # w bounds - variable on lb constraints
-        vb = {idx: CyLPArray([inf if val < inf else 0 for val in n.lp.variablesUpper])
-              for idx, n in disjunctive_nodes.items()}  # v bounds - variable on ub constraints
-
-        # instantiate LP
-        cglp = CyClpSimplex()
-        cglp.logLevel = 0  # quiet output when resolving
-
-        # declare variables (what to do with case when we have degenerate constraint)
-        pi = cglp.addVariable('pi', num_vars)
-        pi0 = cglp.addVariable('pi0', 1)
-        u = {idx: cglp.addVariable(f'u_{idx}', n.lp.nConstraints) for idx, n in
-             disjunctive_nodes.items()}
-        w = {idx: cglp.addVariable(f'w_{idx}', n.lp.nVariables) for idx, n in
-             disjunctive_nodes.items()}
-        v = {idx: cglp.addVariable(f'v_{idx}', n.lp.nVariables) for idx, n in
-             disjunctive_nodes.items()}
-
-        # bound them
-        for idx in disjunctive_nodes:
-            cglp += u[idx] >= 0
-            cglp += 0 <= w[idx] <= wb[idx]
-            cglp += 0 <= v[idx] <= vb[idx]
-
-        # add constraints
-        for i, n in disjunctive_nodes.items():
-            # (pi, pi0) must be valid for each disjunctive term's LP relaxation
-            cglp += 0 >= -pi + n.lp.coefMatrix.T * u[i] + \
-                np.matrix(np.eye(num_vars)) * w[i] - np.matrix(np.eye(num_vars)) * v[i]
-            cglp += 0 <= -pi0 + CyLPArray(n.lp.constraintsLower) * u[i] + \
-                lb[i] * w[i] - ub[i] * v[i]
-        # normalize variables so they don't grow arbitrarily
-        cglp += sum(var.sum() for var_dict in [u, w, v] for var in var_dict.values()) == 1
-
-        # set objective: find the deepest cut
-        # since pi * x >= pi0 for all x in disjunction, we want min pi * x_star - pi0
-        cglp.objective = CyLPArray(root.solution) * pi - pi0
-
-        # solve
-        cglp.primal(startFinishOptions='x')
-        assert cglp.getStatusCode() == 0, 'we should get optimal solution'
-        assert cglp.objectiveValue <= 0, 'pi * x >= pi0 -> pi * x - pi0 >= 0 -> ' \
-            'negative objective at x^* since it gets cut off'
-
-        # get solution
-        return cglp.primalVariableSolution['pi'], cglp.primalVariableSolution['pi0']
 
 
 if __name__ == '__main__':

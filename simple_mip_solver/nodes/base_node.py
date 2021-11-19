@@ -6,6 +6,8 @@ from math import floor, ceil
 import numpy as np
 from typing import Union, List, TypeVar, Dict, Any
 
+from simple_mip_solver.utils import epsilon
+
 T = TypeVar('T', bound='BaseNode')
 
 
@@ -18,7 +20,7 @@ class BaseNode:
     def __init__(self: T, lp: CyClpSimplex, integer_indices: List[int], idx: int = None,
                  lower_bound: Union[float, int] = -float('inf'), b_idx: int = None,
                  b_dir: str = None, b_val: float = None, depth: int = 0,
-                 ancestors: tuple = None):
+                 ancestors: tuple = None, *args, **kwargs):
         """
         :param lp: model object simplex is run against. Assumed Ax >= b
         :param idx: index of this node (e.g. in the branch and bound tree)
@@ -31,6 +33,8 @@ class BaseNode:
         :param depth: how deep in the tree this node is
         :param ancestors: tuple of nodes that preceded this node (e.g. were branched
         on to create this node)
+        :param args: spillover for extra arguments passed by the API not needed for instantiation
+        :param kwargs: spillover for extra arguments passed by the API not needed for instantiation
         """
         assert isinstance(lp, CyClpSimplex), 'lp must be CyClpSimplex instance'
         assert all(0 <= idx < lp.nVariables and isinstance(idx, int) for idx in
@@ -68,7 +72,6 @@ class BaseNode:
         self.lp_feasible = None
         self.unbounded = None
         self.mip_feasible = None
-        self._epsilon = .0001
         self._b_dir = b_dir
         self._b_idx = b_idx
         self._b_val = b_val
@@ -104,7 +107,7 @@ class BaseNode:
             type(sol) == dict else sol
         int_var_vals = None if not self.lp_feasible else self.solution[self._integer_indices]
         self.mip_feasible = self.lp_feasible and \
-            np.max(np.abs(np.round(int_var_vals) - int_var_vals)) < self._epsilon
+            np.max(np.abs(np.round(int_var_vals) - int_var_vals)) < epsilon
 
     def bound(self: T, **kwargs: Any) -> Dict[str, Any]:
         self._base_bound()
@@ -147,9 +150,9 @@ class BaseNode:
             else:
                 l[branch_idx] = ceil(b_val)
             lp += l <= x <= u
-            lp += CyLPArray(self.lp.constraintsLower.copy()) <= self.lp.coefMatrix * x \
-                  <= CyLPArray(self.lp.constraintsUpper.copy())
-            lp.objective = self.lp.objective
+            lp += CyLPArray(self.lp.constraintsLower.copy()) <= self.lp.coefMatrix.copy() * x \
+                <= CyLPArray(self.lp.constraintsUpper.copy())
+            lp.objective = self.lp.objective.copy()
             lp.setBasisStatus(*basis)  # warm start
 
         # return instances of the subclass that calls this function
@@ -157,13 +160,14 @@ class BaseNode:
             'left': type(self)(
                 lp=children['left'], integer_indices=self._integer_indices,
                 idx=next_node_idx, lower_bound=self.objective_value, b_idx=branch_idx,
-                b_dir='left', b_val=b_val, depth=self.depth + 1, ancestors=self.lineage
+                b_dir='left', b_val=b_val, depth=self.depth + 1, ancestors=self.lineage,
+                **kwargs
             ),
             'right': type(self)(
                 lp=children['right'], integer_indices=self._integer_indices,
                 idx=next_node_idx + 1 if next_node_idx is not None else next_node_idx,
                 lower_bound=self.objective_value, b_idx=branch_idx, b_dir='right',
-                b_val=b_val, depth=self.depth + 1, ancestors=self.lineage
+                b_val=b_val, depth=self.depth + 1, ancestors=self.lineage, **kwargs
             ),
             'next_node_idx': next_node_idx + 2 if next_node_idx is not None else next_node_idx
         }
@@ -195,7 +199,7 @@ class BaseNode:
         :return: boolean of value is fractional
         """
         assert isinstance(value, (int, float)), 'value should be a number'
-        return min(value - floor(value), ceil(value) - value) > self._epsilon
+        return min(value - floor(value), ceil(value) - value) > epsilon
 
     @staticmethod
     def _get_fraction(value: Union[int, float]) -> Union[int, float]:
@@ -218,7 +222,7 @@ class BaseNode:
         value
         """
         furthest_index = None
-        furthest_dist = self._epsilon
+        furthest_dist = epsilon
         if self.lp_feasible:
             for idx in self._integer_indices:
                 dist = min(self.solution[idx] - floor(self.solution[idx]),

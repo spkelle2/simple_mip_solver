@@ -6,13 +6,13 @@ from typing import Any, List, TypeVar, Dict, Type
 from simple_mip_solver.nodes.base_node import BaseNode
 
 
-U = TypeVar('U', bound='Utils')
+BA = TypeVar('BA', bound='BaseAlgorithm')
 
 
-class Utils:
+class BaseAlgorithm:
     """Parent class to those used to solve Mixed Integer Linear Programs. Contains
     utility functions useful across multiple classes of algorithms"""
-    def __init__(self: U, model: MILPInstance, Node: Type[BaseNode], node_attributes: List[str],
+    def __init__(self: BA, model: MILPInstance, Node: Type[BaseNode], node_attributes: List[str],
                  node_funcs: List[str], **kwargs: Any):
         # model asserts
         assert isinstance(model, MILPInstance), 'model must be cuppy MILPInstance'
@@ -26,7 +26,7 @@ class Utils:
         assert inspect.isclass(Node), 'Node must be a class'
         # ensures Node constructor has the args we need and no other required ones
         root_node = Node(lp=self.model.lp, integer_indices=self.model.integerIndices,
-                         lower_bound=-float('inf'), idx=0)
+                         idx=0, **kwargs)
         for attribute in node_attributes:
             assert hasattr(root_node, attribute), f'Node needs a {attribute} attribute'
         for func in node_funcs:
@@ -60,7 +60,7 @@ class Utils:
         else:
             return model
 
-    def _process_rtn(self: U, rtn: Dict[str, Any]):
+    def _process_rtn(self: BA, rtn: Dict[str, Any]):
         """ Assign the values of <rtn> to their keyed attributes
 
         :param rtn:

@@ -11,7 +11,7 @@ import os
 import unittest
 
 from simple_mip_solver import BranchAndBound
-from simple_mip_solver.algorithms.utils import Utils
+from simple_mip_solver.algorithms.base_algorithm import BaseAlgorithm
 from test_simple_mip_solver.example_models import generate_random_variety
 
 

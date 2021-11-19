@@ -62,6 +62,7 @@ def main(cut_offs, in_fldr, out_file='warm_start_comparison.csv'):
                 data[c]['cglp time'] + warm_bb[c].solve_time
             data[c]['total restart evaluated nodes'] = cold_bb.evaluated_nodes + \
                 warm_bb[c].evaluated_nodes
+            # dual gap - update all these for that
             data[c]['warm initial gap'] = \
                 abs(warm_bb[c].objective_value - data[c]['warm initial lower bound']) / \
                 abs(warm_bb[c].objective_value)

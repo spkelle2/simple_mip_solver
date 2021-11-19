@@ -199,6 +199,7 @@ class CutGeneratingLP:
 
         # if we find a cut that separates x_star from the disjunction
         if self.lp.objectiveValue <= epsilon:
-            return self.lp.primalVariableSolution['pi'], self.lp.primalVariableSolution['pi0'][0]
+            return CyLPArray(self.lp.primalVariableSolution['pi']), \
+                   self.lp.primalVariableSolution['pi0'][0]
         else:
             return None, None

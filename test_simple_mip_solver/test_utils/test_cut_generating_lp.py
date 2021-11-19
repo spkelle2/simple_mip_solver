@@ -289,6 +289,7 @@ class TestCutGeneratingLP(unittest.TestCase):
         pi, pi0 = cglp.solve()
 
         # check cut is what we expect, i.e. x1 <= 1 or x2 <= 1
+        self.assertTrue(isinstance(pi, CyLPArray))
         assert_allclose(pi / pi0, np.array([0, 1]), atol=.01)
         self.assertTrue((pi - .01 < 0).all())
         self.assertTrue(pi0 - .01 < 0)
@@ -300,6 +301,7 @@ class TestCutGeneratingLP(unittest.TestCase):
         pi, pi0 = cglp.solve()
 
         # check cut is what we expect, i.e. x3 <= 1
+        self.assertTrue(isinstance(pi, CyLPArray))
         assert_allclose(pi / pi0, np.array([0, 0, 1]), atol=.01)
         self.assertTrue((pi - .01 < 0).all())
         self.assertTrue(pi0 - .01 < 0)

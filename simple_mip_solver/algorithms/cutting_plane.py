@@ -3,12 +3,12 @@ import numpy as np
 from typing import Any, TypeVar
 
 from simple_mip_solver.nodes.bound.cutting_plane import CuttingPlaneBoundNode
-from simple_mip_solver.algorithms.utils import Utils
+from simple_mip_solver.algorithms.base_algorithm import BaseAlgorithm
 
 C = TypeVar('C', bound='CuttingPlane')
 
 
-class CuttingPlane(Utils):
+class CuttingPlane(BaseAlgorithm):
     """Class used to solve Mixed Integer Linear Programs with cutting plane methods"""
 
     _node_attributes = ['lower_bound', 'objective_value', 'solution',

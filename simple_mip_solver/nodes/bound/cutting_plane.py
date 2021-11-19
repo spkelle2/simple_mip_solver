@@ -1,12 +1,12 @@
 from __future__ import annotations
 from coinor.cuppy.milpInstance import MILPInstance
-from cylp.cy.CyClpSimplex import CyClpSimplex
-from cylp.py.modeling.CyLPModel import CyLPArray, CyLPExpr
-from typing import Dict, Any, TypeVar, Tuple, List
+from cylp.py.modeling.CyLPModel import CyLPArray, CyLPExpr, CyLPConstraint
+from typing import Dict, Any, TypeVar, Tuple, List, Union
 from math import floor, ceil
 import numpy as np
 
-from simple_mip_solver import BaseNode, BranchAndBound, PseudoCostBranchNode
+from simple_mip_solver import BaseNode, BranchAndBound
+from simple_mip_solver.utils.cut_generating_lp import CutGeneratingLP
 
 G = TypeVar('G', bound='CuttingPlaneBoundNode')
 
@@ -15,19 +15,57 @@ class CuttingPlaneBoundNode(BaseNode):
     """ An extension of the BaseNode class to allow for cutting plane methods.
     Types of cutting planes available are as follows:
         * Optimized Gomory Cuts
+        * Cut Generating LP Cuts
+
+    Instantiate an algorithm, e.g. Branch and Bound, with this node type as follows:
+        BranchAndBound(MILPInstance, CuttingPlaneBoundNode, cglp=cglp, cut_generating_lp=True,
+                       cglp_cumulative_constraints=True)
     """
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, cglp: CutGeneratingLP = None,
+                 cglp_starting_basis: Tuple[np.ndarray, np.ndarray] = None,
+                 *args, **kwargs):
         super().__init__(*args, **kwargs)
         assert self._sense == '>=', 'must have Ax >= b'
         assert self._variables_nonnegative, 'must have x >= 0 for all variables'
         assert len(self.lp.variables) == 1 and self.lp.variables[0].name == 'x', \
             'x must be our only variable'
+        if cglp is not None:
+            assert isinstance(cglp, CutGeneratingLP), 'cglp must be CutGeneratingLP instance'
 
-    # def branch(self: G, **kwargs: Any) -> Dict[str, Any]:
-    #     return super().branch(**kwargs)
+        # needs to be an attribute else self.bound() can't figure out which instance to use
+        # allow whatever here and check if called against
+        self.cglp = cglp
+        self.cglp_starting_basis = cglp_starting_basis
 
-    def bound(self: G, optimized_gomory_cuts: bool = True, **kwargs: Any) -> Dict[str, Any]:
+    def branch(self: G, cglp_cumulative_constraints: bool = False,
+               cglp_cumulative_bounds: bool = False, **kwargs: Any) -> Dict[str, Any]:
+        assert isinstance(cglp_cumulative_constraints, bool), 'cglp_cumulative_constraints is bool'
+        assert isinstance(cglp_cumulative_bounds, bool), 'cglp_cumulative_bounds is bool'
+
+        if self.cglp is None:
+            return super().branch(**kwargs)
+
+        # todo: check that these CGLP's take precedent over the CGLP originally in kwargs
+        elif cglp_cumulative_constraints or cglp_cumulative_bounds:
+            A = None if not cglp_cumulative_constraints else self.lp.coefMatrix.copy()
+            b = None if not cglp_cumulative_constraints else self.lp.constraintsLower.copy()
+            var_lb = None if not cglp_cumulative_bounds else self.lp.variablesLower.copy()
+            var_ub = None if not cglp_cumulative_bounds else self.lp.variablesUpper.copy()
+
+            cglp = CutGeneratingLP(bb=self.cglp.bb, root_id=self.cglp.root_id,
+                                   A=A, b=b, var_lb=var_lb, var_ub=var_ub)
+            # todo: warm start - set all new slack variables as basic (1) and
+            # todo: pivot to find feasible basis when bounds remove constraints from CGLP
+            return super().branch(cglp=cglp, **kwargs)
+
+        else:
+            # if recycling CGLP, pass on basis because children solutions wont be far off
+            return super().branch(cglp=self.cglp, cglp_starting_basis=self.cglp.lp.getBasisStatus(),
+                                  **kwargs)
+
+    def bound(self: G, optimized_gomory_cuts: bool = False, cut_generating_lp: bool = False,
+              **kwargs: Any) -> Dict[str, Any]:
         """ Extends BaseNode's bound by finding a variety of cuts to add after
         solving the LP relaxation
 
@@ -37,12 +75,23 @@ class CuttingPlaneBoundNode(BaseNode):
         :return: rtn, the dictionary returned by the bound method of classes
         with lower priority in method order resolution
         """
-        # inherit this class before others for combos to work
+        assert isinstance(optimized_gomory_cuts, bool), 'optimized_gomory_cuts is boolean'
+        assert isinstance(cut_generating_lp, bool), 'cut_generating_lp is boolean'
+        if cut_generating_lp:
+            assert self.cglp is not None, 'cglp attribute must be defined if using Cut Generating LP'
+
+        # inherit this class first before inheriting others for combos to work
         # https://stackoverflow.com/questions/27954695/what-is-a-sibling-class-in-python
         rtn = super().bound(**kwargs)
         if self.lp_feasible and not self.mip_feasible:
+            cuts = []
             if optimized_gomory_cuts:
                 self._add_optimized_gomory_cuts(**kwargs)
+            if cut_generating_lp:
+                cglp_rtn = self._add_cglp_cut(**kwargs)
+                if cglp_rtn is not None:
+                    cuts.append(cglp_rtn)
+            rtn['cuts'] = cuts
         return rtn
 
     def _add_optimized_gomory_cuts(self: G, **kwargs: Any):
@@ -55,7 +104,7 @@ class CuttingPlaneBoundNode(BaseNode):
         for pi, pi0 in self._find_gomory_cuts():
             # max gives most restrictive lower bound, which we want b/c >= constraints
             pi0 = max(self._optimize_cut(pi, **kwargs), pi0)
-            cut = pi * self.lp.getVarByName('x') >= pi0
+            cut = pi * self.lp.getVarByName('x') >= pi0  # todo: check this is not an array of bools
             self.lp.addConstraint(cut)
 
     def _find_gomory_cuts(self: G) -> List[Tuple[CyLPArray, float]]:
@@ -126,56 +175,24 @@ class CuttingPlaneBoundNode(BaseNode):
         # need lower bound because upper bound is furthest feasible point intersecting
         # the cut. lower bound then ensures no feasible points cut
 
-    def _add_split_inequality(self: G, **kwargs: Any):
-        pass
-        # pi, pi0 = self._find_lift_and_project_cut()
-        # cut = pi * self.lp.getVarByName('x') >= pi0  # which direction in derivation
-        # self.lp.addConstraint(cut)
+    def _add_cglp_cut(self: G, cglp_cumulative_constraints: bool = False,
+                      cglp_cumulative_bounds: bool = False, **kwargs: Any) -> Union[CyLPExpr, None]:
+        """ Add the cut resulting from the CGLP back to the current node.
 
-    def _find_split_inequality(self: G, idx: int, **kwargs: Any):
-        assert idx in self._integer_indices, 'must lift and project on integer index'
-        x_idx = self.solution[idx]
-        assert self._is_fractional(x_idx), "must lift and project on index with fractional value"
+        :param kwargs:
+        :return:
+        """
+        assert isinstance(cglp_cumulative_constraints, bool), 'cglp_cumulative_constraints is bool'
+        assert isinstance(cglp_cumulative_bounds, bool), 'cglp_cumulative_bounds is bool'
 
-        # build the CGLP model from ISE 418 Lecture 15 Slide 7 but for LP with >= constraints
-        lp = CyClpSimplex()
+        pi, pi0 = self.cglp.solve(x_star=CyLPArray(self.solution),
+                                  starting_basis=self.cglp_starting_basis)
+        assert pi is not None and pi0 is not None, 'should get solution if not in the interior'
+        cut = pi * self.lp.getVarByName('x') >= pi0
+        self.lp.addConstraint(cut)
 
-        # declare variables
-        pi = lp.addVariable('pi', self.lp.nVariables)
-        pi0 = lp.addVariable('pi0', 1)
-        u1 = lp.addVariable('u1', self.lp.nConstraints)
-        u2 = lp.addVariable('u2', self.lp.nConstraints)
-        w1 = lp.addVariable('w1', self.lp.nVariables)
-        w2 = lp.addVariable('w2', self.lp.nVariables)
-
-        # set bounds
-        lp += u1 >= CyLPArray(np.zeros(self.lp.nConstraints))
-        lp += u2 >= CyLPArray(np.zeros(self.lp.nConstraints))
-
-        w_ub = CyLPArray(np.zeros(self.lp.nVariables))
-        w_ub[idx] = float('inf')
-        lp += w_ub >= w1 >= CyLPArray(np.zeros(self.lp.nVariables))
-        lp += w_ub >= w2 >= CyLPArray(np.zeros(self.lp.nVariables))
-
-        # set constraints
-        # (pi, pi0) must be valid for both parts of the disjunction
-        lp += 0 >= -pi + self.lp.coefMatrix.T * u1 - w1
-        lp += 0 >= -pi + self.lp.coefMatrix.T * u2 + w2
-        lp += 0 <= -pi0 + CyLPArray(self.lp.constraintsLower) * u1 - floor(x_idx) * w1.sum()
-        lp += 0 <= -pi0 + CyLPArray(self.lp.constraintsLower) * u2 + ceil(x_idx) * w2.sum()
-        # normalize variables
-        lp += u1.sum() + u2.sum() + w1.sum() + w2.sum() == 1
-
-        # set objective: find the deepest cut
-        # since pi * x >= pi0 for all x in disjunction, we want min pi * x_star - pi0
-        lp.objective = CyLPArray(self.solution) * pi - pi0
-
-        # solve
-        lp.primal(startFinishOptions='x')
-        assert lp.getStatusCode() == 0, 'we should get optimal solution'
-        assert lp.objectiveValue <= 0, 'pi * x >= pi -> pi * x - pi >= 0 -> ' \
-                                       'negative objective at x^* since it gets cut off'
-
-        # get solution
-        return lp.primalVariableSolution['pi'], lp.primalVariableSolution['pi0']
-
+        if not cglp_cumulative_constraints and not cglp_cumulative_bounds:
+            # if not running against node specific constraints or bounds, add to other nodes in queue
+            return cut
+        else:
+            return None
