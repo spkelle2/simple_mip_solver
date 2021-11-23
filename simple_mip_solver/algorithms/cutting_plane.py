@@ -3,12 +3,13 @@ import numpy as np
 from typing import Any, TypeVar
 
 from simple_mip_solver.nodes.bound.cutting_plane import CuttingPlaneBoundNode
-from simple_mip_solver.algorithms.utils import Utils
+from simple_mip_solver.algorithms.base_algorithm import BaseAlgorithm
+from simple_mip_solver.utils import epsilon
 
 C = TypeVar('C', bound='CuttingPlane')
 
 
-class CuttingPlane(Utils):
+class CuttingPlane(BaseAlgorithm):
     """Class used to solve Mixed Integer Linear Programs with cutting plane methods"""
 
     _node_attributes = ['lower_bound', 'objective_value', 'solution',
@@ -54,8 +55,7 @@ class CuttingPlane(Utils):
                 self.objective_value = self.root_node.objective_value
                 break
             # if we have change in objective
-            if np.abs(self.root_node.objective_value - prev_objective_value) \
-                    >= self.root_node._epsilon:
+            if np.abs(self.root_node.objective_value - prev_objective_value) >= epsilon:
                 prev_objective_value = self.root_node.objective_value
             else:
                 print("Solution repeated, stalling detected. Exiting")

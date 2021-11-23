@@ -14,7 +14,9 @@ from unittest.mock import patch
 from simple_mip_solver import BaseNode, BranchAndBound, \
     PseudoCostBranchDepthFirstSearchNode as PCBDFSNode, PseudoCostBranchNode
 from simple_mip_solver.algorithms.branch_and_bound import BranchAndBoundTree
-from simple_mip_solver.algorithms.utils import Utils
+from simple_mip_solver.algorithms.base_algorithm import BaseAlgorithm
+from simple_mip_solver.nodes.bound.cutting_plane import CuttingPlaneBoundNode
+from simple_mip_solver.utils.cut_generating_lp import CutGeneratingLP
 from test_simple_mip_solver.example_models import no_branch, small_branch, infeasible, \
     unbounded, infeasible2, h3p1, h3p1_0, h3p1_1, h3p1_2, h3p1_3, h3p1_4, h3p1_5, square, \
     generate_random_variety
@@ -81,7 +83,7 @@ class TestBranchAndBound(unittest.TestCase):
 
     def test_init(self):
         bb = BranchAndBound(small_branch)
-        self.assertTrue(isinstance(bb, Utils))
+        self.assertTrue(isinstance(bb, BaseAlgorithm))
         self.assertTrue(bb.global_upper_bound == float('inf'))
         self.assertTrue(bb._node_queue.empty())
         self.assertFalse(bb._unbounded)
@@ -114,7 +116,7 @@ class TestBranchAndBound(unittest.TestCase):
                                model=small_branch, mip_gap=-5)
 
         # kwargs asserts
-        self.assertRaisesRegex(AssertionError, f'keys "right"', BranchAndBound,
+        self.assertRaisesRegex(AssertionError, 'saved for later use', BranchAndBound,
                                model=small_branch, right=-5)
 
     def test_current_gap(self):
@@ -196,6 +198,7 @@ class TestBranchAndBound(unittest.TestCase):
                 patch.object(bb, '_process_branch_rtn') as pbr, \
                 patch.object(bb.root_node, 'bound') as bd, \
                 patch.object(bb.root_node, 'branch') as bh:
+            bd.return_value = {}
             bb._evaluate_node(bb.root_node)
             self.assertTrue(pr.call_count == 1)
             self.assertTrue(pbr.call_count == 0)
@@ -221,6 +224,7 @@ class TestBranchAndBound(unittest.TestCase):
                 patch.object(bb, '_process_branch_rtn') as pbr, \
                 patch.object(bb.root_node, 'bound') as bd, \
                 patch.object(bb.root_node, 'branch') as bh:
+            bd.return_value = {}
             bb._evaluate_node(bb.root_node)
             self.assertTrue(pr.call_count == 1)  # direct calls
             self.assertTrue(pbr.call_count == 1)
@@ -244,6 +248,7 @@ class TestBranchAndBound(unittest.TestCase):
                 patch.object(bb, '_process_branch_rtn') as pbr, \
                 patch.object(bb.root_node, 'bound') as bd, \
                 patch.object(bb.root_node, 'branch') as bh:
+            bd.return_value = {}
             bb._evaluate_node(bb.root_node)
             self.assertTrue(pr.call_count == 1)
             self.assertTrue(pbr.call_count == 0)
@@ -331,6 +336,33 @@ class TestBranchAndBound(unittest.TestCase):
             self.assertTrue(pr.call_count == 1, 'should call process rtn')
             self.assertTrue(alc.call_count == 1, 'should call add left child')
             self.assertTrue(arc.call_count == 1, 'should call add right child')
+
+    def test_process_bound_rtn_fails_asserts(self):
+        bb = BranchAndBound(small_branch)
+        self.assertRaisesRegex(AssertionError, 'rtn must be a dictionary',
+                               self.bb._process_bound_rtn, 'fish')
+        rtn = {'cuts': ['hi']}
+        self.assertRaisesRegex(AssertionError, 'cuts must be dict',
+                               self.bb._process_bound_rtn, rtn)
+        rtn = {'cuts': {'cut1': 5}}
+        self.assertRaisesRegex(AssertionError, 'each cut must be a CyLPExpr',
+                               self.bb._process_bound_rtn, rtn)
+
+    def test_process_bound_rtn(self):
+        cglp_bb = BranchAndBound(small_branch, node_limit=8)
+        cglp_bb.solve()
+        cglp = CutGeneratingLP(cglp_bb, cglp_bb.root_node.idx)
+        pi, pi0 = cglp.solve()
+        rtn = {'cuts': {'node_0_cglp_cut': pi * cglp_bb.root_node.lp.getVarByName('x') >= pi0}}
+
+        with patch.object(cglp_bb, '_process_rtn') as pr:
+            cglp_bb._process_bound_rtn(rtn)
+            args, kwargs = pr.call_args
+            self.assertTrue(len(args) == 1 and len(kwargs) == 0)
+            self.assertFalse(args[0])
+            for node in cglp_bb._node_queue.queue:
+                self.assertTrue(len(node.lp.constraints) == 2)
+                self.assertTrue(node.lp.constraints[1].name == 'node_0_cglp_cut')
 
     def test_dual_bound_fails_asserts(self):
         bb = BranchAndBound(small_branch)
@@ -474,92 +506,6 @@ class TestBranchAndBound(unittest.TestCase):
                                bb._bound_dual, n.lp)
         self.assertRaisesRegex(AssertionError, "must give CyClpSimplex instance",
                                bb._bound_dual, n)
-
-    def test_find_strong_disjunctive_cut_fails_asserts(self):
-        bb = BranchAndBound(small_branch)
-        bb.solve()
-
-        self.assertRaisesRegex(AssertionError, 'parent must already exist in tree',
-                               bb.find_strong_disjunctive_cut, 50)
-
-        terminal_nodes = bb.tree.get_leaves(0)
-        disjunctive_nodes = [n for n in terminal_nodes if n.lp_feasible is not False]
-        n = disjunctive_nodes[0]
-        n.lp.addVariable('d', 3)
-
-        self.assertRaisesRegex(AssertionError, 'Each disjunctive term should have the same variables',
-                               bb.find_strong_disjunctive_cut, 0)
-
-    # todo: get confirmation on bound matching
-    def test_find_strong_disjunctive_cut(self):
-        bb = BranchAndBound(square)
-        bb.solve()
-        pi, pi0 = bb.find_strong_disjunctive_cut(0)
-
-        # check cut is what we expect, i.e. x1 <= 1
-        assert_allclose(pi/pi0, np.array([1, 0]), atol=.01)
-        self.assertTrue((pi - .01 < 0).all())
-        self.assertTrue(pi0 - .01 < 0)
-
-        # check we get same bound
-        A = np.append(bb.root_node.lp.coefMatrix.toarray(), [pi], axis=0)
-        b = np.append(bb.root_node.lp.constraintsLower, pi0, axis=0)
-        warm_model = MILPInstance(
-            A=A, b=b, c=bb.root_node.lp.objective, l=bb.root_node.lp.variablesLower.copy(),
-            u=bb.root_node.lp.variablesUpper.copy(), sense=['Min', '>='],
-            integerIndices=bb.root_node._integer_indices,
-            numVars=bb.root_node.lp.nVariables
-        )
-        warm_bb = BranchAndBound(warm_model)
-        warm_bb.solve()
-        # self.assertTrue(bb.global_lower_bound == warm_bb.root_node.objective_value)
-
-        # try another problem
-        bb = BranchAndBound(small_branch, node_limit=10)
-        bb.solve()
-        pi, pi0 = bb.find_strong_disjunctive_cut(0)
-
-        # check cut is what we expect, i.e. x3 <= 1
-        assert_allclose(pi/pi0, np.array([0, 0, 1]), atol=.01)
-        self.assertTrue((pi - .01 < 0).all())
-        self.assertTrue(pi0 - .01 < 0)
-
-        # check we get same bound
-        A = np.append(bb.root_node.lp.coefMatrix.toarray(), [pi], axis=0)
-        b = np.append(bb.root_node.lp.constraintsLower, pi0, axis=0)
-        warm_model = MILPInstance(
-            A=A, b=b, c=bb.root_node.lp.objective, l=bb.root_node.lp.variablesLower.copy(),
-            u=bb.root_node.lp.variablesUpper.copy(), sense=['Min', '>='],
-            integerIndices=bb.root_node._integer_indices,
-            numVars=bb.root_node.lp.nVariables
-        )
-        warm_bb = BranchAndBound(warm_model)
-        warm_bb.solve()
-        # self.assertTrue(bb.global_lower_bound == warm_bb.root_node.objective_value)
-
-    @unittest.skipIf(skip_longs, "debugging")
-    def test_find_strong_disjunctive_cut_many_times(self):
-        fldr = os.path.join(
-            os.path.dirname(os.path.abspath(inspect.getfile(generate_random_variety))),
-            'example_models'
-        )
-        for i, file in enumerate(os.listdir(fldr)):
-            if i >= 10:
-                break
-            print(f'running test {i + 1}')
-            pth = os.path.join(fldr, file)
-            model = MILPInstance(file_name=pth)
-            bb = BranchAndBound(model)
-            bb.solve()
-            pi, pi0 = bb.find_strong_disjunctive_cut(0)
-
-            # ensure we cut off the root solution
-            self.assertTrue(sum(pi * bb.root_node.solution) <= pi0)
-
-            # ensure we don't cut off disjunctive mins
-            for n in bb.tree.get_leaves(0):
-                if n.lp_feasible:
-                    self.assertTrue(sum(pi * n.solution) >= pi0 - .01)
 
 
 if __name__ == '__main__':

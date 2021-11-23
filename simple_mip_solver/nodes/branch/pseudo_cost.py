@@ -3,6 +3,7 @@ from math import floor, ceil
 from typing import List, Dict, Union, Any, TypeVar
 
 from simple_mip_solver.nodes.base_node import BaseNode
+from simple_mip_solver.utils import epsilon
 
 T = TypeVar('T', bound='PseudoCostBranchNode')
 pseudo_costs_hint = Dict[int, Dict[str, Dict[str, Union[float, int]]]]
@@ -145,7 +146,7 @@ class PseudoCostBranchNode(BaseNode):
                 if 'cost' not in pseudo_costs[idx][direction]:
                     problems.append(f'index {idx} direction {direction} missing cost')
                 elif not (isinstance(pseudo_costs[idx][direction]['cost'], (int, float)) and
-                          pseudo_costs[idx][direction]['cost'] + self._epsilon >= 0):
+                          pseudo_costs[idx][direction]['cost'] + epsilon >= 0):
                     problems.append(f'index {idx} direction {direction} cost must'
                                     ' be nonnegative number')
                 if 'times' not in pseudo_costs[idx][direction]:
