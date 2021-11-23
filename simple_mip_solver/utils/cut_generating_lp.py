@@ -1,5 +1,6 @@
 from cylp.cy.CyClpSimplex import CyClpSimplex, CyLPArray
 import numpy as np
+from scipy.sparse import csc_matrix
 from typing import Tuple, TypeVar, Iterable, Union
 
 from simple_mip_solver import BranchAndBound
@@ -26,7 +27,18 @@ class CutGeneratingLP:
 
         :param bb: branch and bound tree from which we recover the disjunction
         :param root_id: id of the node off which we will base the disjunction
-        :return: a CGLP instance
+        :param A: The coefficient matrix to use for each disjunctive term's LP
+        relaxation. If None, each disjunctive term will use its existing LP relaxation's
+        coefficient matrix
+        :param b: The RHS to be used for the constraints (assumed to be Ax >= b)
+        in each disjunctive term's LP relaxation. If None, each disjunctive term
+        will use its existing LP relaxation's RHS
+        :param var_lb: Lower bound to place on the variables in each disjunctive term.
+        If provided, the lower bound on each disjunctive term's variables is updated
+        to be max(var_lb, <current lb>). If not, lower bounds are unchanged.
+        :param var_ub: Upper bound to place on the variables in each disjunctive term.
+        If provided, the upper bound on each disjunctive term's variables is updated
+        to be min(var_ub, <current ub>). If not, upper bounds are unchanged.
         """
         # sanity checks
         assert isinstance(bb, BranchAndBound), 'bb must be a BranchAndBound instance'
@@ -73,13 +85,15 @@ class CutGeneratingLP:
         # useful constants
         num_vars = sum(var_dim for var_dim in var_dicts[0].values())
         root = self.bb.tree.get_node_instances(self.root_id)
+        assert root.solution is not None, 'root must be solved to create CGLP'
         inf = root.lp.getCoinInfinity()
 
         # sanity checks
         assert (A is None and b is None) or (A is not None and b is not None), \
             "A and b must both have values or must both be None"
         if A is not None:
-            assert isinstance(A, np.matrix), "A must be a numpy matrix"
+            assert isinstance(A, np.matrix) or isinstance(A, csc_matrix), \
+                "A must be a numpy or sparse csc matrix"
             assert A.shape[1] == num_vars, \
                 "A must have same number of columns as each disjunctive term has variables"
         if b is not None:

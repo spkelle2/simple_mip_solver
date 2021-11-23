@@ -6,6 +6,7 @@ import unittest
 
 from simple_mip_solver import CuttingPlane
 from simple_mip_solver.algorithms.base_algorithm import BaseAlgorithm
+from simple_mip_solver.utils import epsilon
 from test_simple_mip_solver.example_models import cut1, infeasible, unbounded, cut2
 
 
@@ -37,7 +38,7 @@ class TestNode(unittest.TestCase):
         cp = CuttingPlane(self.cut1_std)
         cp.solve()
         self.assertTrue(cp.status == 'optimal')
-        self.assertTrue(np.max(np.abs(cp.solution - np.array([7, 5]))) < cp.root_node._epsilon)
+        self.assertTrue(np.max(np.abs(cp.solution - np.array([7, 5]))) < epsilon)
         self.assertTrue(isclose(cp.objective_value, -5, abs_tol=.01))
 
 

@@ -2,6 +2,7 @@ from coinor.cuppy.milpInstance import MILPInstance
 from cylp.py.modeling.CyLPModel import CyLPArray, CyLPExpr
 import inspect
 import os
+from scipy.sparse import csc_matrix
 
 # so pulp and pyomo don't believe reading in flat files is a worthwhile feature
 # so we don't have much of an option here but to use some sort of commercial solver
@@ -19,6 +20,7 @@ from unittest.mock import patch
 from simple_mip_solver import CuttingPlaneBoundNode, BaseNode, BranchAndBound
 from simple_mip_solver.algorithms.base_algorithm import BaseAlgorithm
 from simple_mip_solver.utils.cut_generating_lp import CutGeneratingLP
+from simple_mip_solver.utils import epsilon
 from test_simple_mip_solver.example_models import cut1, infeasible, no_branch, \
     cut2, lift_project, generate_random_variety
 from test_simple_mip_solver.helpers import TestModels
@@ -46,11 +48,6 @@ class TestNode(TestModels):
         self.assertRaisesRegex(AssertionError, 'must have x >= 0 for all variables',
                                CuttingPlaneBoundNode, lp=self.cut1_std.lp,
                                integer_indices=self.cut1_std.integerIndices)
-        s = self.cut2_std.lp.addVariable('s', 1)
-        self.cut2_std.lp += s >= CyLPArray([0])
-        self.assertRaisesRegex(AssertionError, 'x must be our only variable',
-                               CuttingPlaneBoundNode, lp=self.cut2_std.lp,
-                               integer_indices=self.cut2_std.integerIndices)
 
     def test_init_fails_asserts2(self):
         bb = BranchAndBound(self.cut1_std)
@@ -105,9 +102,13 @@ class TestNode(TestModels):
             self.assertTrue(cm.called)
             args, kwargs = cm.call_args
             self.assertTrue((kwargs['A'] == n.lp.coefMatrix).toarray().all())
+            self.assertTrue(isinstance(kwargs['A'], csc_matrix))
             self.assertTrue((kwargs['b'] == n.lp.constraintsLower).all())
+            self.assertTrue(isinstance(kwargs['b'], CyLPArray))
             self.assertTrue((kwargs['var_lb'] == n.lp.variablesLower).all())
+            self.assertTrue(isinstance(kwargs['var_lb'], CyLPArray))
             self.assertTrue((kwargs['var_ub'] == n.lp.variablesUpper).all())
+            self.assertTrue(isinstance(kwargs['var_ub'], CyLPArray))
 
             # check branch call
             self.assertTrue(bm.called)
@@ -129,27 +130,30 @@ class TestNode(TestModels):
             self.assertTrue((kwargs['cglp_starting_basis'][1] == cglp.lp.getBasisStatus()[1]).all())
             self.assertTrue(rtn == 'rtn', 'should just return what parent branch does')
 
-    # todo: resume here
     def test_bound_fails_asserts(self):
         n = CuttingPlaneBoundNode(lp=self.cut1_std.lp, integer_indices=self.cut1_std.integerIndices)
         self.assertRaisesRegex(AssertionError, 'optimized_gomory_cuts is bool',
-                               n.branch, optimized_gomory_cuts=0)
+                               n.bound, optimized_gomory_cuts=0)
         self.assertRaisesRegex(AssertionError, 'cut_generating_lp is bool',
-                               n.branch, cut_generating_lp=0)
+                               n.bound, cut_generating_lp=0)
         self.assertRaisesRegex(AssertionError, 'cglp attribute must be defined',
-                               n.branch, cut_generating_lp=True)
+                               n.bound, cut_generating_lp=True)
 
+    # the test here is have super().bound() return empty dict and check if cuts are added
     def test_bound(self):
         bb = BranchAndBound(self.cut1_std)
         bb.solve()
         cglp = CutGeneratingLP(bb, bb.root_node.idx)
 
         # check function calls
-        node = CuttingPlaneBoundNode(lp=self.cut1_std.lp, integer_indices=self.cut1_std.integerIndices,
+        node = CuttingPlaneBoundNode(lp=self.cut1_std.lp,
+                                     integer_indices=self.cut1_std.integerIndices,
                                      cglp=cglp)
-        node_inf = CuttingPlaneBoundNode(self.infeasible_std.lp, self.infeasible_std.integerIndices,
+        node_inf = CuttingPlaneBoundNode(lp=self.infeasible_std.lp,
+                                         integer_indices=self.infeasible_std.integerIndices,
                                          cglp=cglp)
-        node_opt = CuttingPlaneBoundNode(self.no_branch_std.lp, self.no_branch_std.integerIndices,
+        node_opt = CuttingPlaneBoundNode(lp=self.no_branch_std.lp,
+                                         integer_indices=self.no_branch_std.integerIndices,
                                          cglp=cglp)
         with patch.object(BaseNode, 'bound') as b:
             node.bound()
@@ -171,14 +175,15 @@ class TestNode(TestModels):
             self.assertTrue(acc.called)
 
         # check return
-        node = CuttingPlaneBoundNode(lp=self.cut1_std.lp, integer_indices=self.cut1_std.integerIndices, cglp=cglp)
+        node = CuttingPlaneBoundNode(lp=self.cut1_std.lp, integer_indices=self.cut1_std.integerIndices,
+                                     cglp=cglp, idx=0)
         rtn = node.bound(optimized_gomory_cuts=True, cut_generating_lp=True)
         self.assertTrue(isinstance(rtn, dict), 'should return dict')
-        self.assertTrue(len(rtn['cuts'] == 1))
-        self.assertTrue(isinstance(rtn['cuts'][0], CyLPExpr), 'should return CyLPExpr')
+        self.assertTrue(len(rtn['cuts']) == 1)
+        self.assertTrue(isinstance(rtn['cuts']['node_0_cglp_cut'], CyLPExpr), 'should return CyLPExpr')
 
     def test_add_optimized_gomory_cuts(self):
-        node = CuttingPlaneBoundNode(self.cut2_std.lp, self.cut2_std.integerIndices)
+        node = CuttingPlaneBoundNode(lp=self.cut2_std.lp, integer_indices=self.cut2_std.integerIndices)
         # check function calls
         with patch.object(node, '_find_gomory_cuts') as fgb, \
                 patch.object(node, '_optimize_cut') as oc:
@@ -195,17 +200,17 @@ class TestNode(TestModels):
         self.assertTrue(isinstance(rtn, dict), 'should return dict')
 
     def test_find_gomory_cuts(self):
-        node = CuttingPlaneBoundNode(self.cut2_std.lp, self.cut2_std.integerIndices)
+        node = CuttingPlaneBoundNode(lp=self.cut2_std.lp, integer_indices=self.cut2_std.integerIndices)
         super(CuttingPlaneBoundNode, node).bound()
         cuts = node._find_gomory_cuts()
         self.assertTrue(len(cuts) == 2)
-        self.assertTrue(np.max(np.abs(cuts[0][0] - np.array([-3.3, -1.2]))) < node._epsilon)
+        self.assertTrue(np.max(np.abs(cuts[0][0] - np.array([-3.3, -1.2]))) < epsilon)
         self.assertTrue(isclose(cuts[0][1], -24.1, abs_tol=.01))
-        self.assertTrue(np.max(np.abs(cuts[1][0] - np.array([-1.2, -1.8]))) < node._epsilon)
+        self.assertTrue(np.max(np.abs(cuts[1][0] - np.array([-1.2, -1.8]))) < epsilon)
         self.assertTrue(isclose(cuts[1][1], -15.4, abs_tol=.01))
 
     def test_optimize_cut(self):
-        node = CuttingPlaneBoundNode(self.cut2_std.lp, self.cut2_std.integerIndices)
+        node = CuttingPlaneBoundNode(lp=self.cut2_std.lp, integer_indices=self.cut2_std.integerIndices)
         super(CuttingPlaneBoundNode, node).bound()
         cuts = node._find_gomory_cuts()
         pi0 = node._optimize_cut(cuts[0][0])
@@ -220,10 +225,10 @@ class TestNode(TestModels):
         node = CuttingPlaneBoundNode(lp=self.cut1_std.lp, integer_indices=self.cut1_std.integerIndices, cglp=cglp)
         super(CuttingPlaneBoundNode, node).bound()
 
-        self.assertRaisesRegex(AssertionError, 'optimized_gomory_cuts is bool',
-                               node.branch, optimized_gomory_cuts=0)
-        self.assertRaisesRegex(AssertionError, 'cut_generating_lp is bool',
-                               node.branch, cut_generating_lp=0)
+        self.assertRaisesRegex(AssertionError, 'cglp_cumulative_constraints is bool',
+                               node._add_cglp_cut, cglp_cumulative_constraints=0)
+        self.assertRaisesRegex(AssertionError, 'cglp_cumulative_bounds is bool',
+                               node._add_cglp_cut, cglp_cumulative_bounds=0)
 
         # check function calls
         with patch.object(node.cglp, 'solve') as s:
@@ -236,23 +241,35 @@ class TestNode(TestModels):
         cglp = CutGeneratingLP(bb, bb.root_node.idx)
         node = CuttingPlaneBoundNode(cglp=cglp, lp=self.cut1_std.lp, integer_indices=self.cut1_std.integerIndices)
         super(CuttingPlaneBoundNode, node).bound()
-        pi, pi0 = cglp.solve(x_star=CyLPArray(node.lp.solution),
+        pi, pi0 = cglp.solve(x_star=CyLPArray(node.solution),
                              starting_basis=node.cglp_starting_basis)
 
         # check function calls
-        with patch.object(node.lp, 'addConstraint') as ac, \
-                patch.object(node.cglp, 'solve') as s:
+        with patch.object(node.cglp, 'solve') as s:
+            # check what happens if constraint coefs are 0
+            s.return_value = (CyLPArray(np.zeros(2)), pi0)
+            rtn = node._add_cglp_cut()
+            self.assertTrue(s.called)
+            # make sure no cut was added
+            self.assertTrue(len(node.lp.constraints) == 1)
+            # make sure nothing was returned
+            self.assertTrue(rtn is None)
+
+            # check otherwise
             s.return_value = (pi, pi0)
             node._add_cglp_cut()
             self.assertTrue(s.called)
-            self.assertTrue(ac.called)
-            self.assertTrue(ac.call_args.args == [pi * node.lp.getVarByName('x') >= pi0])
+            # make sure the cut was added
+            self.assertTrue(len(node.lp.constraints) == 2)
+            self.assertTrue(isclose(node.lp.constraints[1].lower, pi0, abs_tol=.01))
+            x = node.lp.getVarByName('x')
+            np.testing.assert_allclose(node.lp.constraints[1].varCoefs[x], pi)
 
         # check returns
+        cut = node._add_cglp_cut()
+        self.assertTrue(isinstance(cut, CyLPExpr), 'should return CyLPExpr')
         cut = node._add_cglp_cut(cglp_cumulative_constraints=True,
                                  cglp_cumulative_bounds=True)
-        self.assertTrue(isinstance(cut, CyLPExpr), 'should return CyLPExpr')
-        cut = node._add_cglp_cut()
         self.assertFalse(cut)
 
     # test after fixing branch and bound tests
@@ -263,7 +280,7 @@ class TestNode(TestModels):
             'example_models'
         )
 
-        # todo: fix gomory cuts and add their check here
+        # todo: when gomory cuts are fixed, add their check here
         kwargs_list = [
             {'cut_generating_lp': True},
             {'cut_generating_lp': True, 'cglp_cumulative_constraints': True},
@@ -271,9 +288,13 @@ class TestNode(TestModels):
             {'cut_generating_lp': True, 'cglp_cumulative_constraints': True,
              'cglp_cumulative_bounds': True},
         ]
+        num_kwargs = len(kwargs_list)
+        num_fldrs = len(os.listdir(fldr))
         for j, kwargs in enumerate(kwargs_list):
             for i, file in enumerate(os.listdir(fldr)):
-                print(f'running test {(i + 1)*(j + 1)}')
+                if np.random.uniform() > 1:
+                    continue
+                print(f'running test {(i + 1) + j*num_fldrs} of {num_kwargs*num_fldrs}')
                 pth = os.path.join(fldr, file)
                 model = MILPInstance(file_name=pth)
                 cglp_bb = BranchAndBound(model, node_limit=8)

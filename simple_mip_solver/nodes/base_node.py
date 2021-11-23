@@ -91,6 +91,7 @@ class BaseNode:
         :return: a placeholder dictionary for return that the branch and bound
         algorithm expects
         """
+        assert self._x_only_variable, 'x must be our only variable'
         # I make the assumption here that dual infeasible implies primal unbounded.
         # I know this isn't always true, but I am making the educated guess that
         # cylp would have to find a dual infeasibility at the root node before a
@@ -126,6 +127,7 @@ class BaseNode:
 
         :return: dict of Nodes with the new bounds keyed by direction they branched
         """
+        assert self._x_only_variable, 'x must be our only variable'
         assert next_node_idx is None or isinstance(next_node_idx, int), \
             'next node index should be integer if provided'
         assert self.lp_feasible, 'must solve before branching'
@@ -150,8 +152,11 @@ class BaseNode:
             else:
                 l[branch_idx] = ceil(b_val)
             lp += l <= x <= u
-            lp += CyLPArray(self.lp.constraintsLower.copy()) <= self.lp.coefMatrix.copy() * x \
-                <= CyLPArray(self.lp.constraintsUpper.copy())
+            for constr in self.lp.constraints:
+                lp.addConstraint(
+                    CyLPArray(constr.lower.copy()) <= constr.varCoefs[constr.variables[0]] * x
+                    <= CyLPArray(constr.upper.copy()), name=constr.name
+                )
             lp.objective = self.lp.objective.copy()
             lp.setBasisStatus(*basis)  # warm start
 
@@ -274,3 +279,11 @@ class BaseNode:
         :return:
         """
         return (self.lp.variablesLower >= 0).all()
+
+    @property
+    def _x_only_variable(self: T):
+        """ Determine if x is the only variable in our model
+
+        :return:
+        """
+        return len(self.lp.variables) == 1 and self.lp.variables[0].name == 'x'

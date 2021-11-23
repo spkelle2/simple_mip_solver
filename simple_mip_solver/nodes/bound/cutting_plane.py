@@ -1,11 +1,11 @@
 from __future__ import annotations
 from coinor.cuppy.milpInstance import MILPInstance
-from cylp.py.modeling.CyLPModel import CyLPArray, CyLPExpr, CyLPConstraint
+from cylp.py.modeling.CyLPModel import CyLPArray, CyLPExpr
 from typing import Dict, Any, TypeVar, Tuple, List, Union
-from math import floor, ceil
 import numpy as np
 
 from simple_mip_solver import BaseNode, BranchAndBound
+from simple_mip_solver.utils import constraint_epsilon
 from simple_mip_solver.utils.cut_generating_lp import CutGeneratingLP
 
 G = TypeVar('G', bound='CuttingPlaneBoundNode')
@@ -13,7 +13,7 @@ G = TypeVar('G', bound='CuttingPlaneBoundNode')
 
 class CuttingPlaneBoundNode(BaseNode):
     """ An extension of the BaseNode class to allow for cutting plane methods.
-    Types of cutting planes available are as follows:
+    Types of cutting planes available (with their respective key word arguments) are as follows:
         * Optimized Gomory Cuts
         * Cut Generating LP Cuts
 
@@ -25,33 +25,51 @@ class CuttingPlaneBoundNode(BaseNode):
     def __init__(self, cglp: CutGeneratingLP = None,
                  cglp_starting_basis: Tuple[np.ndarray, np.ndarray] = None,
                  *args, **kwargs):
+        """
+
+        :param cglp: The CGLP instance to use for creating disjunctive cuts, off which
+        children's CGLP's will be built
+        :param cglp_starting_basis: The starting basis status for each variable in the CGLP instance
+        :param args:
+        :param kwargs:
+        """
         super().__init__(*args, **kwargs)
         assert self._sense == '>=', 'must have Ax >= b'
         assert self._variables_nonnegative, 'must have x >= 0 for all variables'
-        assert len(self.lp.variables) == 1 and self.lp.variables[0].name == 'x', \
-            'x must be our only variable'
         if cglp is not None:
             assert isinstance(cglp, CutGeneratingLP), 'cglp must be CutGeneratingLP instance'
 
-        # needs to be an attribute else self.bound() can't figure out which instance to use
-        # allow whatever here and check if called against
         self.cglp = cglp
         self.cglp_starting_basis = cglp_starting_basis
 
     def branch(self: G, cglp_cumulative_constraints: bool = False,
-               cglp_cumulative_bounds: bool = False, **kwargs: Any) -> Dict[str, Any]:
+               cglp_cumulative_bounds: bool = False, cglp: CutGeneratingLP = None,
+               **kwargs: Any) -> Dict[str, Any]:
+        """Before calling parent and sibling class branch methods, create the
+        cglp instance for each child node. Note, if the user sets either parameter to
+        True, cuts generated from the CGLP can no longer be added to other nodes
+
+        :param cglp_cumulative_constraints: Whether or not to refine the feasible
+        region of each disjunctive term in the CGLP with cuts added to this node
+        :param cglp_cumulative_bounds: Whether or not to refine the feasible
+        region of each disjunctive term in the CGLP with the bounds placed on each
+        variable in this node
+        :param cglp: Pulls 'cglp' from kwargs as to not interfere with cglp assignment
+        in called subroutines
+        :param kwargs:
+        :return:
+        """
         assert isinstance(cglp_cumulative_constraints, bool), 'cglp_cumulative_constraints is bool'
         assert isinstance(cglp_cumulative_bounds, bool), 'cglp_cumulative_bounds is bool'
 
         if self.cglp is None:
             return super().branch(**kwargs)
 
-        # todo: check that these CGLP's take precedent over the CGLP originally in kwargs
         elif cglp_cumulative_constraints or cglp_cumulative_bounds:
             A = None if not cglp_cumulative_constraints else self.lp.coefMatrix.copy()
-            b = None if not cglp_cumulative_constraints else self.lp.constraintsLower.copy()
-            var_lb = None if not cglp_cumulative_bounds else self.lp.variablesLower.copy()
-            var_ub = None if not cglp_cumulative_bounds else self.lp.variablesUpper.copy()
+            b = None if not cglp_cumulative_constraints else CyLPArray(self.lp.constraintsLower.copy())
+            var_lb = None if not cglp_cumulative_bounds else CyLPArray(self.lp.variablesLower.copy())
+            var_ub = None if not cglp_cumulative_bounds else CyLPArray(self.lp.variablesUpper.copy())
 
             cglp = CutGeneratingLP(bb=self.cglp.bb, root_id=self.cglp.root_id,
                                    A=A, b=b, var_lb=var_lb, var_ub=var_ub)
@@ -67,10 +85,14 @@ class CuttingPlaneBoundNode(BaseNode):
     def bound(self: G, optimized_gomory_cuts: bool = False, cut_generating_lp: bool = False,
               **kwargs: Any) -> Dict[str, Any]:
         """ Extends BaseNode's bound by finding a variety of cuts to add after
-        solving the LP relaxation
+        solving the LP relaxation. Any cuts generated that are valid for all other
+        Node instances can be added to the `cuts` list and added as a key to the
+        return dictionary
 
         :param optimized_gomory_cuts: if True, add optimized gomory cuts to LP
         relaxation after bounding
+        :param cut_generating_lp: If True, add disjunctive cuts generated from the
+        CGLP to the LP relaxation after bounding
         :param kwargs: dictionary of arguments to pass on to selected subroutines
         :return: rtn, the dictionary returned by the bound method of classes
         with lower priority in method order resolution
@@ -84,13 +106,13 @@ class CuttingPlaneBoundNode(BaseNode):
         # https://stackoverflow.com/questions/27954695/what-is-a-sibling-class-in-python
         rtn = super().bound(**kwargs)
         if self.lp_feasible and not self.mip_feasible:
-            cuts = []
+            cuts = {}
             if optimized_gomory_cuts:
                 self._add_optimized_gomory_cuts(**kwargs)
             if cut_generating_lp:
-                cglp_rtn = self._add_cglp_cut(**kwargs)
-                if cglp_rtn is not None:
-                    cuts.append(cglp_rtn)
+                cglp_cut = self._add_cglp_cut(**kwargs)
+                if cglp_cut is not None:
+                    cuts[f'node_{self.idx}_cglp_cut'] = cglp_cut
             rtn['cuts'] = cuts
         return rtn
 
@@ -104,7 +126,7 @@ class CuttingPlaneBoundNode(BaseNode):
         for pi, pi0 in self._find_gomory_cuts():
             # max gives most restrictive lower bound, which we want b/c >= constraints
             pi0 = max(self._optimize_cut(pi, **kwargs), pi0)
-            cut = pi * self.lp.getVarByName('x') >= pi0  # todo: check this is not an array of bools
+            cut = pi * self.lp.getVarByName('x') >= pi0
             self.lp.addConstraint(cut)
 
     def _find_gomory_cuts(self: G) -> List[Tuple[CyLPArray, float]]:
@@ -143,6 +165,8 @@ class CuttingPlaneBoundNode(BaseNode):
                 # Ax - s = b => s = Ax - b. gomory is pi^T * x + pi_s^T * s >= 1, thus
                 # pi^T * x + pi_s^T * (Ax - b) >= 1 => (pi + A^T * pi_s)^T * x >= 1 + pi_s^T * b
                 pi += self.lp.coefMatrix.T * pi_slacks
+                # todo: maybe this needs a constriant epsilon too
+                # todo: check out if we can use actual constraints instead of coefMatrix and lower
                 pi0 = 1 + np.dot(pi_slacks, self.lp.constraintsLower)
                 # append pi >= pi0
                 cuts.append((pi, pi0))
@@ -177,8 +201,14 @@ class CuttingPlaneBoundNode(BaseNode):
 
     def _add_cglp_cut(self: G, cglp_cumulative_constraints: bool = False,
                       cglp_cumulative_bounds: bool = False, **kwargs: Any) -> Union[CyLPExpr, None]:
-        """ Add the cut resulting from the CGLP back to the current node.
+        """ Add the disjunctive cut resulting from the CGLP back to the current node.
+        If both cglp_cumulative_constraints and cglp_cumulative_bounds are False,
+        then return the added cut so the algorithm can add it to other nodes
 
+        :param optimized_gomory_cuts: if True, add optimized gomory cuts to LP
+        relaxation after bounding
+        :param cut_generating_lp: If True, add disjunctive cuts generated from the
+        CGLP to the LP relaxation after bounding
         :param kwargs:
         :return:
         """
@@ -188,11 +218,14 @@ class CuttingPlaneBoundNode(BaseNode):
         pi, pi0 = self.cglp.solve(x_star=CyLPArray(self.solution),
                                   starting_basis=self.cglp_starting_basis)
         assert pi is not None and pi0 is not None, 'should get solution if not in the interior'
-        cut = pi * self.lp.getVarByName('x') >= pi0
-        self.lp.addConstraint(cut)
 
-        if not cglp_cumulative_constraints and not cglp_cumulative_bounds:
+        # don't return anything if constraint coefficients are effectively 0
+        if np.linalg.norm(pi) > constraint_epsilon:
+            cut = pi * self.lp.getVarByName('x') >= pi0
+            self.lp.addConstraint(cut, name=f'node_{self.idx}_cglp_cut')
+
             # if not running against node specific constraints or bounds, add to other nodes in queue
-            return cut
-        else:
-            return None
+            if not cglp_cumulative_constraints and not cglp_cumulative_bounds:
+                return cut
+
+        return None

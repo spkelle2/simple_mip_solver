@@ -15,6 +15,8 @@ from simple_mip_solver import BaseNode, BranchAndBound, \
     PseudoCostBranchDepthFirstSearchNode as PCBDFSNode, PseudoCostBranchNode
 from simple_mip_solver.algorithms.branch_and_bound import BranchAndBoundTree
 from simple_mip_solver.algorithms.base_algorithm import BaseAlgorithm
+from simple_mip_solver.nodes.bound.cutting_plane import CuttingPlaneBoundNode
+from simple_mip_solver.utils.cut_generating_lp import CutGeneratingLP
 from test_simple_mip_solver.example_models import no_branch, small_branch, infeasible, \
     unbounded, infeasible2, h3p1, h3p1_0, h3p1_1, h3p1_2, h3p1_3, h3p1_4, h3p1_5, square, \
     generate_random_variety
@@ -114,7 +116,7 @@ class TestBranchAndBound(unittest.TestCase):
                                model=small_branch, mip_gap=-5)
 
         # kwargs asserts
-        self.assertRaisesRegex(AssertionError, f'keys "right"', BranchAndBound,
+        self.assertRaisesRegex(AssertionError, 'saved for later use', BranchAndBound,
                                model=small_branch, right=-5)
 
     def test_current_gap(self):
@@ -196,6 +198,7 @@ class TestBranchAndBound(unittest.TestCase):
                 patch.object(bb, '_process_branch_rtn') as pbr, \
                 patch.object(bb.root_node, 'bound') as bd, \
                 patch.object(bb.root_node, 'branch') as bh:
+            bd.return_value = {}
             bb._evaluate_node(bb.root_node)
             self.assertTrue(pr.call_count == 1)
             self.assertTrue(pbr.call_count == 0)
@@ -221,6 +224,7 @@ class TestBranchAndBound(unittest.TestCase):
                 patch.object(bb, '_process_branch_rtn') as pbr, \
                 patch.object(bb.root_node, 'bound') as bd, \
                 patch.object(bb.root_node, 'branch') as bh:
+            bd.return_value = {}
             bb._evaluate_node(bb.root_node)
             self.assertTrue(pr.call_count == 1)  # direct calls
             self.assertTrue(pbr.call_count == 1)
@@ -244,6 +248,7 @@ class TestBranchAndBound(unittest.TestCase):
                 patch.object(bb, '_process_branch_rtn') as pbr, \
                 patch.object(bb.root_node, 'bound') as bd, \
                 patch.object(bb.root_node, 'branch') as bh:
+            bd.return_value = {}
             bb._evaluate_node(bb.root_node)
             self.assertTrue(pr.call_count == 1)
             self.assertTrue(pbr.call_count == 0)
@@ -331,6 +336,33 @@ class TestBranchAndBound(unittest.TestCase):
             self.assertTrue(pr.call_count == 1, 'should call process rtn')
             self.assertTrue(alc.call_count == 1, 'should call add left child')
             self.assertTrue(arc.call_count == 1, 'should call add right child')
+
+    def test_process_bound_rtn_fails_asserts(self):
+        bb = BranchAndBound(small_branch)
+        self.assertRaisesRegex(AssertionError, 'rtn must be a dictionary',
+                               self.bb._process_bound_rtn, 'fish')
+        rtn = {'cuts': ['hi']}
+        self.assertRaisesRegex(AssertionError, 'cuts must be dict',
+                               self.bb._process_bound_rtn, rtn)
+        rtn = {'cuts': {'cut1': 5}}
+        self.assertRaisesRegex(AssertionError, 'each cut must be a CyLPExpr',
+                               self.bb._process_bound_rtn, rtn)
+
+    def test_process_bound_rtn(self):
+        cglp_bb = BranchAndBound(small_branch, node_limit=8)
+        cglp_bb.solve()
+        cglp = CutGeneratingLP(cglp_bb, cglp_bb.root_node.idx)
+        pi, pi0 = cglp.solve()
+        rtn = {'cuts': {'node_0_cglp_cut': pi * cglp_bb.root_node.lp.getVarByName('x') >= pi0}}
+
+        with patch.object(cglp_bb, '_process_rtn') as pr:
+            cglp_bb._process_bound_rtn(rtn)
+            args, kwargs = pr.call_args
+            self.assertTrue(len(args) == 1 and len(kwargs) == 0)
+            self.assertFalse(args[0])
+            for node in cglp_bb._node_queue.queue:
+                self.assertTrue(len(node.lp.constraints) == 2)
+                self.assertTrue(node.lp.constraints[1].name == 'node_0_cglp_cut')
 
     def test_dual_bound_fails_asserts(self):
         bb = BranchAndBound(small_branch)

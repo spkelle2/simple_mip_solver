@@ -11,6 +11,7 @@ import unittest
 from unittest.mock import patch, PropertyMock
 
 from simple_mip_solver import BaseNode
+from simple_mip_solver.algorithms.base_algorithm import BaseAlgorithm
 from test_simple_mip_solver.example_models import no_branch, small_branch, \
     infeasible, random, unbounded, cut2
 from test_simple_mip_solver.helpers import TestModels
@@ -19,6 +20,15 @@ from test_simple_mip_solver.helpers import TestModels
 class TestNode(TestModels):
 
     Node = BaseNode  # define this for the TestModels attribute
+
+    def setUp(self) -> None:
+        # reset models each test so lps dont keep added constraints
+        for name, m in {'cut2_std': cut2}.items():
+            lp = m.lp
+            new_m = MILPInstance(A=m.A, b=m.b, c=lp.objective, l=m.l, sense=['Min', m.sense],
+                                 integerIndices=m.integerIndices, numVars=len(lp.objective))
+            new_m = BaseAlgorithm._convert_constraints_to_greq(new_m)
+            setattr(self, name, new_m)
 
     def test_init(self):
         node = BaseNode(small_branch.lp, small_branch.integerIndices)
@@ -33,7 +43,6 @@ class TestNode(TestModels):
         self.assertFalse(node.lp_feasible, 'should have lp_feasible but empty')
         self.assertFalse(node.unbounded, 'should have unbounded but empty')
         self.assertFalse(node.mip_feasible, 'should have mip_feasible but empty')
-        self.assertTrue(node._epsilon > 0, 'should have epsilon > 0')
         self.assertFalse(node._b_dir, 'should have branch direction but empty')
         self.assertFalse(node._b_idx, 'should have branch index but empty')
         self.assertFalse(node._b_val, 'should have node value but empty')
@@ -93,6 +102,11 @@ class TestNode(TestModels):
                                integer_indices=small_branch.integerIndices,
                                idx=0, ancestors=(0,))
 
+    def test_base_bound_fails_asserts(self):
+        node = self.make_multivariable_node()
+        self.assertRaisesRegex(AssertionError, 'x must be our only variable',
+                               node._base_bound)
+    
     def test_base_bound_integer(self):
         node = BaseNode(no_branch.lp, no_branch.integerIndices)
         node._base_bound()
@@ -144,6 +158,11 @@ class TestNode(TestModels):
         self.assertFalse(rtn, 'dict should be empty')
 
     def test_base_branch_fails_asserts(self):
+        # branching with multiple named variables in lp should fail
+        node = self.make_multivariable_node()
+        self.assertRaisesRegex(AssertionError, 'x must be our only variable',
+                               node._base_branch, branch_idx=1)
+
         # branching with bad next node idx should fail
         node = BaseNode(no_branch.lp, no_branch.integerIndices)
         self.assertRaisesRegex(AssertionError, 'next node index should be integer',
@@ -334,6 +353,17 @@ class TestNode(TestModels):
         l[0] = -10
         node.lp.variablesLower = l
         self.assertFalse(node._variables_nonnegative)
+
+    def test_x_only_variable(self):
+        node = BaseNode(small_branch.lp, small_branch.integerIndices, 0)
+        self.assertTrue(node._x_only_variable)
+        node = self.make_multivariable_node()
+        self.assertFalse(node._x_only_variable)
+        
+    def make_multivariable_node(self):
+        s = self.cut2_std.lp.addVariable('s', 1)
+        self.cut2_std.lp += s >= CyLPArray([0])
+        return BaseNode(self.cut2_std.lp, self.cut2_std.integerIndices, 0)
 
     def test_models(self):
         self.base_test_models()

@@ -216,11 +216,11 @@ class BranchAndBound(BaseAlgorithm):
         assert isinstance(rtn, dict), 'rtn must be a dictionary'
         cuts = rtn.get('cuts')
         if cuts:
-            assert isinstance(cuts, Iterable), 'cuts must be iterable'
-            for cut in cuts:
+            assert isinstance(cuts, dict), 'cuts must be dict'
+            for name, cut in cuts.items():
                 assert isinstance(cut, CyLPExpr), 'each cut must be a CyLPExpr'
                 for node in self._node_queue.queue:
-                    node.lp.addConstraint(cut)
+                    node.lp.addConstraint(cut, name=name)
             del rtn['cuts']
         self._process_rtn(rtn)
 
