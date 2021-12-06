@@ -37,7 +37,7 @@ class TestNode(TestModels):
         self.assertFalse(node.idx, 'idx should be None')
         self.assertTrue(node._var_indices == list(range(3)), 'should have list of var indices')
         self.assertTrue(node._row_indices == list(range(2)), 'should have list of row indices')
-        self.assertTrue(node.lower_bound == -float('inf'))
+        self.assertTrue(node.dual_bound == -float('inf'))
         self.assertFalse(node.objective_value, 'should have obj but empty')
         self.assertFalse(node.solution, 'should have solution but empty')
         self.assertFalse(node.lp_feasible, 'should have lp_feasible but empty')
@@ -73,9 +73,9 @@ class TestNode(TestModels):
                                idx=0.5)
         self.assertRaisesRegex(AssertionError, 'indices must be distinct',
                                BaseNode, small_branch.lp, [0, 1, 1])
-        self.assertRaisesRegex(AssertionError, 'lower bound must be a float or an int',
+        self.assertRaisesRegex(AssertionError, 'dual bound must be a float or an int',
                                BaseNode, small_branch.lp, small_branch.integerIndices,
-                               lower_bound='five')
+                               dual_bound='five')
         self.assertRaisesRegex(AssertionError, 'none are none or all are none',
                                BaseNode, small_branch.lp, small_branch.integerIndices,
                                b_dir='up')
@@ -202,7 +202,7 @@ class TestNode(TestModels):
                 self.assertTrue(all(n.lp.constraintsLower == node.lp.constraintsLower))
                 self.assertTrue(all(n.lp.constraintsUpper == node.lp.constraintsUpper))
                 self.assertTrue(n._integer_indices == node._integer_indices)
-                self.assertTrue(n.lower_bound == node.objective_value)
+                self.assertTrue(n.dual_bound == node.objective_value)
                 self.assertTrue(n._b_idx == idx)
                 self.assertTrue(n._b_val == 1.5)
                 self.assertTrue(n.depth == 1)
@@ -318,8 +318,8 @@ class TestNode(TestModels):
         q = PriorityQueue()
         q.put(node2)
         q.put(node1)
-        self.assertTrue(q.get().lower_bound < 0)
-        self.assertTrue(q.get().lower_bound == 0)
+        self.assertTrue(q.get().dual_bound < 0)
+        self.assertTrue(q.get().dual_bound == 0)
 
     def test_eq(self):
         node1 = BaseNode(small_branch.lp, small_branch.integerIndices, 0, -float('inf'))

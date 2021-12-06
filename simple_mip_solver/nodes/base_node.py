@@ -18,14 +18,14 @@ class BaseNode:
     """
 
     def __init__(self: T, lp: CyClpSimplex, integer_indices: List[int], idx: int = None,
-                 lower_bound: Union[float, int] = -float('inf'), b_idx: int = None,
+                 dual_bound: Union[float, int] = -float('inf'), b_idx: int = None,
                  b_dir: str = None, b_val: float = None, depth: int = 0,
                  ancestors: tuple = None, *args, **kwargs):
         """
         :param lp: model object simplex is run against. Assumed Ax >= b
         :param idx: index of this node (e.g. in the branch and bound tree)
         :param integer_indices: indices of variables we aim to find integer solutions
-        :param lower_bound: starting lower bound on optimal objective value
+        :param dual_bound: starting lower bound on optimal objective value
         for the minimization problem in this node
         :param b_idx: index of the branching variable
         :param b_dir: direction of branching
@@ -42,8 +42,8 @@ class BaseNode:
         assert idx is None or isinstance(idx, int), 'node idx must be integer if provided'
         assert len(set(integer_indices)) == len(integer_indices), \
             'indices must be distinct'
-        assert isinstance(lower_bound, float) or isinstance(lower_bound, int), \
-            'lower bound must be a float or an int'
+        assert isinstance(dual_bound, float) or isinstance(dual_bound, int), \
+            'dual bound must be a float or an int'
         assert (b_dir is None) == (b_idx is None) == (b_val is None), \
             'none are none or all are none'
         assert b_idx in integer_indices or b_idx is None, \
@@ -66,7 +66,7 @@ class BaseNode:
         self.idx = idx
         self._var_indices = list(range(lp.nVariables))
         self._row_indices = list(range(lp.nConstraints))
-        self.lower_bound = lower_bound
+        self.dual_bound = dual_bound
         self.objective_value = None
         self.solution = None
         self.lp_feasible = None
@@ -164,14 +164,14 @@ class BaseNode:
         return {
             'left': type(self)(
                 lp=children['left'], integer_indices=self._integer_indices,
-                idx=next_node_idx, lower_bound=self.objective_value, b_idx=branch_idx,
+                idx=next_node_idx, dual_bound=self.objective_value, b_idx=branch_idx,
                 b_dir='left', b_val=b_val, depth=self.depth + 1, ancestors=self.lineage,
                 **kwargs
             ),
             'right': type(self)(
                 lp=children['right'], integer_indices=self._integer_indices,
                 idx=next_node_idx + 1 if next_node_idx is not None else next_node_idx,
-                lower_bound=self.objective_value, b_idx=branch_idx, b_dir='right',
+                dual_bound=self.objective_value, b_idx=branch_idx, b_dir='right',
                 b_val=b_val, depth=self.depth + 1, ancestors=self.lineage, **kwargs
             ),
             'next_node_idx': next_node_idx + 2 if next_node_idx is not None else next_node_idx
@@ -251,7 +251,7 @@ class BaseNode:
     # implementation of best first search
     def __eq__(self: T, other):
         if isinstance(other, BaseNode):
-            return self.lower_bound == other.lower_bound
+            return self.dual_bound == other.dual_bound
         else:
             raise TypeError('A Node can only be compared with another Node')
 
@@ -259,7 +259,7 @@ class BaseNode:
     # want priority to go to node with lowest lower_bound
     def __lt__(self: T, other):
         if isinstance(other, BaseNode):
-            return self.lower_bound < other.lower_bound
+            return self.dual_bound < other.dual_bound
         else:
             raise TypeError('A Node can only be compared with another Node')
 

@@ -11,7 +11,7 @@ from test_simple_mip_solver.example_models import small_branch, h3p1
 
 
 class TestBaseAlgorithm(unittest.TestCase):
-    _node_attributes = ['lower_bound', 'objective_value', 'solution',
+    _node_attributes = ['dual_bound', 'objective_value', 'solution',
                         'lp_feasible', 'mip_feasible', 'search_method',
                         'branch_method']
     _node_funcs = ['bound', 'branch', '__lt__', '__eq__']

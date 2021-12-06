@@ -12,8 +12,7 @@ C = TypeVar('C', bound='CuttingPlane')
 class CuttingPlane(BaseAlgorithm):
     """Class used to solve Mixed Integer Linear Programs with cutting plane methods"""
 
-    _node_attributes = ['lower_bound', 'objective_value', 'solution',
-                        'lp_feasible', 'mip_feasible']
+    _node_attributes = ['objective_value', 'solution', 'lp_feasible', 'mip_feasible']
     _node_funcs = ['bound']
 
     def __init__(self: C, model: MILPInstance, Node: Any = CuttingPlaneBoundNode,

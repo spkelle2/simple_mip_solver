@@ -84,7 +84,8 @@ class TestBranchAndBound(unittest.TestCase):
     def test_init(self):
         bb = BranchAndBound(small_branch)
         self.assertTrue(isinstance(bb, BaseAlgorithm))
-        self.assertTrue(bb.global_upper_bound == float('inf'))
+        self.assertTrue(bb.primal_bound == float('inf'))
+        self.assertTrue(bb.dual_bound == -float('inf'))
         self.assertTrue(bb._node_queue.empty())
         self.assertFalse(bb._unbounded)
         self.assertFalse(bb._best_solution)
@@ -96,6 +97,8 @@ class TestBranchAndBound(unittest.TestCase):
         self.assertTrue(bb.tree.nodes[0].attr['node'] is bb.root_node)
         self.assertFalse(bb.solve_time, 'solve time should exist and be 0')
         self.assertTrue(bb.mip_gap, 'mip gap should be an attribute')
+        self.assertFalse(bb.logging)
+        self.assertTrue(bb.max_run_time == float('inf'))
 
     def test_init_fails_asserts(self):
         bb = BranchAndBound(small_branch)
@@ -115,6 +118,18 @@ class TestBranchAndBound(unittest.TestCase):
         self.assertRaisesRegex(AssertionError, f'mip_gap', BranchAndBound,
                                model=small_branch, mip_gap=-5)
 
+        # logging asserts
+        self.assertRaisesRegex(AssertionError, f'logging', BranchAndBound,
+                               model=small_branch, logging=0)
+
+        # run time assert
+        self.assertRaisesRegex(AssertionError, f'max_run_time', BranchAndBound,
+                               model=small_branch, max_run_time=0)
+
+        # initial primal bound assert
+        self.assertRaisesRegex(AssertionError, f'initial_primal_bound', BranchAndBound,
+                               model=small_branch, initial_primal_bound=-float('inf'))
+
         # kwargs asserts
         self.assertRaisesRegex(AssertionError, 'saved for later use', BranchAndBound,
                                model=small_branch, right=-5)
@@ -131,12 +146,20 @@ class TestBranchAndBound(unittest.TestCase):
         self.assertTrue(bb.current_gap == 0)
         print()
 
+    def test_solve_stopped_on_time(self):
+        # check and make sure we're good with both nodes
+        for Node in [BaseNode, PCBDFSNode]:
+            bb = BranchAndBound(small_branch, Node=Node, max_run_time=.000001, pseudo_costs={})
+            bb.solve()
+            self.assertTrue(bb.status == 'stopped on iterations or time')
+            self.assertTrue(bb.solve_time > .000001)
+
     def test_solve_stopped_on_iterations(self):
         # check and make sure we're good with both nodes
         for Node in [BaseNode, PCBDFSNode]:
             bb = BranchAndBound(small_branch, Node=Node, node_limit=1, pseudo_costs={})
             bb.solve()
-            self.assertTrue(bb.status == 'stopped on iterations')
+            self.assertTrue(bb.status == 'stopped on iterations or time')
             self.assertTrue(bb.solve_time)
 
     def test_solve_optimal(self):
@@ -189,8 +212,8 @@ class TestBranchAndBound(unittest.TestCase):
         # check attributes
         self.assertTrue(bb._node_queue.empty(), 'inf model should create no nodes')
         self.assertFalse(bb._best_solution, 'best solution should not change')
-        self.assertTrue(bb.global_upper_bound == float('inf'), 'shouldnt change')
-        self.assertTrue(bb.global_lower_bound == float('inf'), 'shouldnt change')
+        self.assertTrue(bb.primal_bound == float('inf'), 'shouldnt change')
+        self.assertTrue(bb.dual_bound == float('inf'), 'shouldnt change')
         self.assertTrue(bb.evaluated_nodes == 1, 'only one node should be evaluated')
 
         # check function calls - recycle object since it has attrs already set
@@ -212,8 +235,8 @@ class TestBranchAndBound(unittest.TestCase):
 
         # check attributes
         self.assertFalse(bb._best_solution, 'best solution should not change')
-        self.assertTrue(bb.global_upper_bound == float('inf'), 'shouldnt change')
-        self.assertTrue(bb.global_lower_bound > -float('inf'), 'should change')
+        self.assertTrue(bb.primal_bound == float('inf'), 'shouldnt change')
+        self.assertTrue(bb.dual_bound > -float('inf'), 'should change')
         self.assertTrue(bb._node_queue.qsize() == 2, 'should branch and add two nodes')
         self.assertTrue(bb._kwargs['pseudo_costs'], 'something should be set')
         self.assertTrue(bb._kwargs['strong_branch_iters'], 'something should be set')
@@ -238,8 +261,8 @@ class TestBranchAndBound(unittest.TestCase):
 
         # check attributes
         self.assertTrue(all(bb._best_solution == [1, 1, 0]))
-        self.assertTrue(bb.global_upper_bound == -2)
-        self.assertTrue(bb.global_lower_bound == -2, 'should match upper bound when optimal')
+        self.assertTrue(bb.primal_bound == -2)
+        self.assertTrue(bb.dual_bound == -2, 'should match upper bound when optimal')
         self.assertTrue(bb._node_queue.empty(), 'immediately optimal model should create no nodes')
         self.assertTrue(bb.evaluated_nodes == 1, 'only one node should be evaluated')
 
@@ -264,10 +287,9 @@ class TestBranchAndBound(unittest.TestCase):
         self.assertTrue(bb.evaluated_nodes == 1, 'only one node should be evaluated')
 
     def test_evaluate_node_properly_prunes(self):
-        bb = BranchAndBound(no_branch)
-        bb.global_upper_bound = -2
-        called_node = BaseNode(bb.model.lp, bb.model.integerIndices, lower_bound=-4)
-        pruned_node = BaseNode(bb.model.lp, bb.model.integerIndices, lower_bound=0)
+        bb = BranchAndBound(no_branch, initial_primal_bound=-2)
+        called_node = BaseNode(bb.model.lp, bb.model.integerIndices, dual_bound=-4)
+        pruned_node = BaseNode(bb.model.lp, bb.model.integerIndices, dual_bound=0)
         with patch.object(called_node, 'bound') as cnb, \
                 patch.object(pruned_node, 'bound') as pnb:
             cnb.return_value = {}
@@ -364,29 +386,29 @@ class TestBranchAndBound(unittest.TestCase):
                 self.assertTrue(len(node.lp.constraints) == 2)
                 self.assertTrue(node.lp.constraints[1].name == 'node_0_cglp_cut')
 
-    def test_dual_bound_fails_asserts(self):
+    def test_find_dual_bound_fails_asserts(self):
         bb = BranchAndBound(small_branch)
         self.assertRaisesRegex(AssertionError, 'must solve this instance before',
-                               bb.dual_bound, CyLPArray([2.5, 4.5]))
+                               bb.find_dual_bound, CyLPArray([2.5, 4.5]))
         bb.solve()
         self.assertRaisesRegex(AssertionError, 'only works with CyLP arrays',
-                               bb.dual_bound, np.array([2.5, 4.5]))
+                               bb.find_dual_bound, np.array([2.5, 4.5]))
         self.assertRaisesRegex(AssertionError, 'shape of the RHS being added should match',
-                               bb.dual_bound, CyLPArray([4.5]))
+                               bb.find_dual_bound, CyLPArray([4.5]))
 
         bb = BranchAndBound(infeasible2)
         bb.root_node.lp += np.matrix([[0, -1, -1]]) * bb.root_node.lp.getVarByName('x') >= CyLPArray([-2.5])
         bb.solve()
         self.assertRaisesRegex(AssertionError, 'feature expects the root node to have a single constraint object',
-                               bb.dual_bound, CyLPArray([2.5, 4.5]))
+                               bb.find_dual_bound, CyLPArray([2.5, 4.5]))
 
-    def test_dual_bound(self):
+    def test_find_dual_bound(self):
 
-        # Ensure that BranchAndBound.dual_bound generates the dual function
+        # Ensure that BranchAndBound.find_dual_bound generates the dual function
         # that we saw in ISE 418 HW 3 problem 1
         bb = BranchAndBound(h3p1)
         bb.solve()
-        bound = bb.dual_bound(CyLPArray([3.5, -3.5]))
+        bound = bb.find_dual_bound(CyLPArray([3.5, -3.5]))
         self.assertTrue(bb.objective_value == bound, 'dual should be strong at original rhs')
 
         prob = {0: h3p1_0, 1: h3p1_1, 2: h3p1_2, 3: h3p1_3, 4: h3p1_4, 5: h3p1_5}
@@ -395,7 +417,7 @@ class TestBranchAndBound(unittest.TestCase):
         for beta in range(6):
             new_bb = BranchAndBound(prob[beta])
             new_bb.solve()
-            bound = bb.dual_bound(CyLPArray(np.array([beta, -beta])))
+            bound = bb.find_dual_bound(CyLPArray(np.array([beta, -beta])))
             self.assertTrue(isclose(sol_new[beta], new_bb.objective_value, abs_tol=.01),
                             'new branch and bound objective should match expected')
             self.assertTrue(isclose(sol_bound[beta], bound),
@@ -405,7 +427,7 @@ class TestBranchAndBound(unittest.TestCase):
 
         bb = BranchAndBound(small_branch)
         bb.solve()
-        bound = bb.dual_bound(CyLPArray([2.5, 4.5]))
+        bound = bb.find_dual_bound(CyLPArray([2.5, 4.5]))
 
         # just make sure the dual bound works here too
         self.assertTrue(bound <= -5.99,
@@ -417,18 +439,18 @@ class TestBranchAndBound(unittest.TestCase):
         bound_duals = [bb._bound_dual(n.lp) for n in bb.tree.get_node_instances([6, 12, 10, 8, 2])]
         with patch.object(bb, '_bound_dual') as bd:
             bd.side_effect = bound_duals
-            bound = bb.dual_bound(CyLPArray([3, 3]))
+            bound = bb.find_dual_bound(CyLPArray([3, 3]))
             self.assertTrue(bd.call_count == 5)
 
         bb = BranchAndBound(small_branch)
         bb.solve()
-        bound = bb.dual_bound(CyLPArray([3, 3]))
+        bound = bb.find_dual_bound(CyLPArray([3, 3]))
         with patch.object(bb, '_bound_dual') as bd:
-            bound = bb.dual_bound(CyLPArray([1, 1]))
+            bound = bb.find_dual_bound(CyLPArray([1, 1]))
             self.assertFalse(bd.called)
 
     @unittest.skipIf(skip_longs, "debugging")
-    def test_dual_bound_many_times(self):
+    def test_find_dual_bound_many_times(self):
         pattern = re.compile('evaluation_(\d+).mps')
         fldr_pth = os.path.join(os.path.dirname(os.path.abspath(inspect.getfile(example_models))),
                                 'example_value_functions')
@@ -445,7 +467,7 @@ class TestBranchAndBound(unittest.TestCase):
             instance_0 = evals[0]
             for bb in evals.values():
                 # all problems were given as <=, so their constraints were flipped by default
-                self.assertTrue(instance_0.dual_bound(CyLPArray(-bb.model.b)) <=
+                self.assertTrue(instance_0.find_dual_bound(CyLPArray(-bb.model.b)) <=
                                 bb.objective_value + .01, 'dual_bound should be less')
 
     def test_bound_dual(self):

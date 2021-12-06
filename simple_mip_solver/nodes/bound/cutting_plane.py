@@ -195,7 +195,7 @@ class CuttingPlaneBoundNode(BaseNode):
         bb = BranchAndBound(model=model, Node=BaseNode,
                             node_limit=cut_optimization_node_limit, pseudo_costs={})
         bb.solve()
-        return bb.objective_value if bb.status == 'optimal' else bb.global_lower_bound
+        return bb.objective_value if bb.status == 'optimal' else bb.dual_bound
         # need lower bound because upper bound is furthest feasible point intersecting
         # the cut. lower bound then ensures no feasible points cut
 
