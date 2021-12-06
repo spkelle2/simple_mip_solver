@@ -35,7 +35,7 @@ class TestNode(unittest.TestCase):
                                self.cut1_std, max_iters=0)
 
     def test_solve_optimal(self):
-        cp = CuttingPlane(self.cut1_std)
+        cp = CuttingPlane(self.cut1_std, optimized_gomory_cuts=True)
         cp.solve()
         self.assertTrue(cp.status == 'optimal')
         self.assertTrue(np.max(np.abs(cp.solution - np.array([7, 5]))) < epsilon)

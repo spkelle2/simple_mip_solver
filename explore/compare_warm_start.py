@@ -47,8 +47,8 @@ def main(cut_offs, in_fldr, out_file='warm_start_comparison.csv'):
             data[c] = {
                 'cold initial lower bound': cold_bb.root_node.objective_value,
                 'warm initial lower bound': warm_bb[c].root_node.objective_value,
-                'cold cut off lower bound': cold_bb.global_lower_bound,
-                'warm cut off lower bound': warm_bb[c].global_lower_bound,
+                'cold cut off lower bound': cold_bb.dual_bound,
+                'warm cut off lower bound': warm_bb[c].dual_bound,
                 'cut off time': cold_bb.solve_time,
                 'cglp time': cglp_time
             }
@@ -75,8 +75,8 @@ def main(cut_offs, in_fldr, out_file='warm_start_comparison.csv'):
         cold_bb.node_limit = float('inf')
         cold_bb.solve()
         for c in cut_offs:
-            assert cold_bb.global_lower_bound <= warm_bb[c].global_upper_bound + .01 and \
-                   cold_bb.global_upper_bound + .01 >= warm_bb[c].global_lower_bound, \
+            assert cold_bb.dual_bound <= warm_bb[c].primal_bound + .01 and \
+                   cold_bb.primal_bound + .01 >= warm_bb[c].dual_bound, \
                    'gaps should overlap'
             data[c]['cold initial gap'] = \
                 abs(cold_bb.objective_value - data[c]['cold initial lower bound']) / \

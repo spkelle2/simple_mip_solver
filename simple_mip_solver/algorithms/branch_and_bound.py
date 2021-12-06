@@ -52,9 +52,9 @@ class BranchAndBound(BaseAlgorithm):
     """Class used to solve Mixed Integer Linear Programs with the Branch and
     Bound algorithm"""
 
-    _node_attributes = ['lower_bound', 'objective_value', 'solution',
+    _node_attributes = ['dual_bound', 'objective_value', 'solution',
                         'lp_feasible', 'mip_feasible', 'search_method',
-                        'branch_method', 'idx', 'lp']  # move lp to public
+                        'branch_method', 'idx', 'lp', 'is_leaf', 'lineage']
     _node_funcs = ['bound', 'branch', '__lt__', '__eq__']
     _queue_funcs = ['put', 'get', 'empty']
 
@@ -62,8 +62,12 @@ class BranchAndBound(BaseAlgorithm):
     # so kwargs = {'strong_branch_iters': 5, 'pseudo_costs': {}}
     def __init__(self: B, model: MILPInstance, Node: Type[BaseNode] = BaseNode,
                  node_queue: Any = None, node_limit: int = float('inf'),
-                 mip_gap: float = .0001, **kwargs: Any):
+                 mip_gap: float = .0001, logging=False, max_run_time=float('inf'),
+                 initial_primal_bound: float = float('inf'), **kwargs: Any):
         f""" Instantiates a Branch and Bound instance.
+        
+        CAUTION: During instantiation, all problems are converted to minimization
+        with constraints of the form Ax >= b
         
         :param model: A MILPInstance object that defines the MILP we solve
         :param Node: A class containing attributes {self._node_attributes} and methods
@@ -72,8 +76,13 @@ class BranchAndBound(BaseAlgorithm):
         This object is what holds and prioritizes nodes to be solved in branch and
         bound.
         :param node_limit: if provided, max number of nodes to explore
-        :param standardize_model: if True, converts model to Ax >= b with bounds
-        moved to constraints to enable display and cutting plane methods
+        :param mip_gap: How close 1 minus the ratio of dual to primal bound must be 
+        for the solver to terminate
+        :param logging: Whether or not the solver prints status updates
+        :param max_run_time: Maximum amount of time (in seconds) the solver will run
+        before terminating
+        :param initial_primal_bound: Best known objective value for feasible solutions
+        to the MIP. NOTE: the MIP will only return a solution if a better one is found.
         :param kwargs: dictionary passed to the branch and bound functions as
         key worded arguments and which adds keys and updates values based on
         what is returned
@@ -96,6 +105,15 @@ class BranchAndBound(BaseAlgorithm):
         # mip_gap assert
         assert 0 <= mip_gap < 1, 'mip_gap is a ratio between 0 and 1'
 
+        # logging assert
+        assert isinstance(logging, bool), 'logging is boolean'
+
+        # run time assert
+        assert max_run_time > 0, 'max_run_time is positive value'
+
+        # initial primal bound assert
+        assert initial_primal_bound > -float('inf'), 'initial_primal_bound is real or infinite'
+
         # kwargs assert
         special_keys = {'right', 'left', 'cuts'}
         assert set(kwargs.keys()).isdisjoint(special_keys), \
@@ -109,24 +127,26 @@ class BranchAndBound(BaseAlgorithm):
         self.solution = None
         self.status = 'unsolved'
         self.objective_value = None
-        self.global_upper_bound = float('inf')
-        self.global_lower_bound = -float('inf')
+        self.primal_bound = initial_primal_bound
+        self.dual_bound = -float('inf')
         self.node_limit = node_limit
         self.tree = BranchAndBoundTree()
         self.tree.add_root(self.root_node.idx, node=self.root_node)
         self.solve_time = 0
         self.mip_gap = mip_gap
+        self.logging = logging
+        self.max_run_time = max_run_time
 
     @property
     def current_gap(self):
-        if self.global_upper_bound == self.global_lower_bound == 0:
+        if self.primal_bound == self.dual_bound == 0:
             gap = 0
-        elif self.global_upper_bound == 0:
+        elif self.primal_bound == 0:
             gap = float('inf')
-        elif self.global_upper_bound == float('inf'):
+        elif self.primal_bound == float('inf'):
             gap = None
         else:
-            gap = abs(self.global_upper_bound - self.global_lower_bound)/abs(self.global_upper_bound)
+            gap = abs(self.primal_bound - self.dual_bound) / abs(self.primal_bound)
         return gap
 
     def solve(self: B) -> None:
@@ -142,17 +162,20 @@ class BranchAndBound(BaseAlgorithm):
 
         while not (self._node_queue.empty() or self._unbounded or
                    self.evaluated_nodes >= self.node_limit or
-                   (self.current_gap is not None and self.current_gap <= self.mip_gap)):
+                   (self.current_gap is not None and self.current_gap <= self.mip_gap) or
+                   time.process_time() - start > self.max_run_time):
+            if self.evaluated_nodes % 100 == 0 and self.logging:
+                print(f'{self.evaluated_nodes} nodes evaluated gap: {self.current_gap}')
             self._evaluate_node(self._node_queue.get())
 
         run_time = time.process_time() - start
         self.solve_time += run_time
         self.status = 'unbounded' if self._unbounded else 'infeasible' if \
-            self._node_queue.empty() and self.global_upper_bound == float('inf') else \
-            'optimal' if self.global_upper_bound < float('inf') and self.current_gap <= self.mip_gap \
-            else 'stopped on iterations'
+            self._node_queue.empty() and self.primal_bound == float('inf') else \
+            'optimal' if self.primal_bound < float('inf') and self.current_gap <= self.mip_gap \
+            else 'stopped on iterations or time'
         self.solution = self._best_solution
-        self.objective_value = self.global_upper_bound
+        self.objective_value = self.primal_bound
 
     def _evaluate_node(self: B, node: BaseNode) -> None:
         """Bounds and optionally branches on the given node. Updates any attributes
@@ -162,7 +185,7 @@ class BranchAndBound(BaseAlgorithm):
         :param node: the object that is bounded and potentially branched on.
         :return:
         """
-        if node.lower_bound < self.global_upper_bound:
+        if node.dual_bound < self.primal_bound:
             self.evaluated_nodes += 1
 
             self._process_bound_rtn(node.bound(**self._kwargs))
@@ -172,15 +195,15 @@ class BranchAndBound(BaseAlgorithm):
             if node.unbounded:
                 self._unbounded = True
 
-            if node.lp_feasible and node.objective_value < self.global_upper_bound:
+            if node.lp_feasible and node.objective_value < self.primal_bound:
                 if node.mip_feasible:
                     self._best_solution = node.solution
-                    self.global_upper_bound = node.objective_value
+                    self.primal_bound = node.objective_value
                 else:
                     self._process_branch_rtn(node.idx, node.branch(**self._kwargs))
 
-        self.global_lower_bound = min([n.lower_bound for n in self._node_queue.queue] +
-                                      [self.global_upper_bound])
+        self.dual_bound = min([n.dual_bound for n in self._node_queue.queue] +
+                              [self.primal_bound])
 
     def _process_branch_rtn(self: B, parent_id: int, rtn: Dict[str, Any]):
         """ Pull the nodes returned from branching out of the rtn dict and into
@@ -230,7 +253,7 @@ class BranchAndBound(BaseAlgorithm):
     # entrust the user to better know what they're doing using this function with cuts added
     # enforce above that branching is done by bounding variables and not adding constraints
     # i don't even think we need that enforcement because it would be cpatured in a constraint
-    def dual_bound(self, b: CyLPArray) -> float:
+    def find_dual_bound(self, b: CyLPArray) -> float:
         """ Calculates a lower bound on the optimal objective value of the current
         MIP at a new RHS b by evaluating the dual function (BB.D from ISE 418 Lecture 8
         Slide 29) at b. Assumes the underlying LP relaxations all have a single
