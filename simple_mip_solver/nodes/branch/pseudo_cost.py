@@ -3,7 +3,7 @@ from math import floor, ceil
 from typing import List, Dict, Union, Any, TypeVar
 
 from simple_mip_solver.nodes.base_node import BaseNode
-from simple_mip_solver.utils import epsilon
+from simple_mip_solver.utils import variable_epsilon
 
 T = TypeVar('T', bound='PseudoCostBranchNode')
 pseudo_costs_hint = Dict[int, Dict[str, Dict[str, Union[float, int]]]]
@@ -57,8 +57,9 @@ class PseudoCostBranchNode(BaseNode):
                       self._is_fractional(self.solution[idx])
                       and idx not in self.pseudo_costs]
         for idx in sb_indices:
-            for strong_branch_node in self._strong_branch(
-                    idx, self.strong_branch_iters).values():
+            if idx == 13:
+                print()
+            for strong_branch_node in self._strong_branch(idx, self.strong_branch_iters).values():
                 self._calculate_costs(strong_branch_node)
 
         # calculate pseudo_cost[self.b_idx][self.b_dir] if we didn't just above
@@ -146,7 +147,7 @@ class PseudoCostBranchNode(BaseNode):
                 if 'cost' not in pseudo_costs[idx][direction]:
                     problems.append(f'index {idx} direction {direction} missing cost')
                 elif not (isinstance(pseudo_costs[idx][direction]['cost'], (int, float)) and
-                          pseudo_costs[idx][direction]['cost'] + epsilon >= 0):
+                          pseudo_costs[idx][direction]['cost'] + variable_epsilon >= 0):
                     problems.append(f'index {idx} direction {direction} cost must'
                                     ' be nonnegative number')
                 if 'times' not in pseudo_costs[idx][direction]:

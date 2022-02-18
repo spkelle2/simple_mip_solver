@@ -20,7 +20,7 @@ from unittest.mock import patch
 from simple_mip_solver import CuttingPlaneBoundNode, BaseNode, BranchAndBound
 from simple_mip_solver.algorithms.base_algorithm import BaseAlgorithm
 from simple_mip_solver.utils.cut_generating_lp import CutGeneratingLP
-from simple_mip_solver.utils import epsilon
+from simple_mip_solver.utils import variable_epsilon
 from test_simple_mip_solver.example_models import cut1, infeasible, no_branch, \
     cut2, lift_project, generate_random_variety
 from test_simple_mip_solver.helpers import TestModels
@@ -190,7 +190,7 @@ class TestNode(TestModels):
             fgb.return_value = [(CyLPArray([-3.3, -1.2]), -24.1),
                                 (CyLPArray([-1.2, -1.8]), -15.4)]
             oc.return_value = -50
-            node._add_optimized_gomory_cuts()
+            node._add_gomory_cuts()
             self.assertTrue(fgb.called)
             self.assertTrue(oc.call_count == 2)
             self.assertTrue(len(node.lp.constraints) == 3)
@@ -204,9 +204,9 @@ class TestNode(TestModels):
         super(CuttingPlaneBoundNode, node).bound()
         cuts = node._find_gomory_cuts()
         self.assertTrue(len(cuts) == 2)
-        self.assertTrue(np.max(np.abs(cuts[0][0] - np.array([-3.3, -1.2]))) < epsilon)
+        self.assertTrue(np.max(np.abs(cuts[0][0] - np.array([-3.3, -1.2]))) < variable_epsilon)
         self.assertTrue(isclose(cuts[0][1], -24.1, abs_tol=.01))
-        self.assertTrue(np.max(np.abs(cuts[1][0] - np.array([-1.2, -1.8]))) < epsilon)
+        self.assertTrue(np.max(np.abs(cuts[1][0] - np.array([-1.2, -1.8]))) < variable_epsilon)
         self.assertTrue(isclose(cuts[1][1], -15.4, abs_tol=.01))
 
     def test_optimize_cut(self):
@@ -226,14 +226,14 @@ class TestNode(TestModels):
         super(CuttingPlaneBoundNode, node).bound()
 
         self.assertRaisesRegex(AssertionError, 'cglp_cumulative_constraints is bool',
-                               node._add_cglp_cut, cglp_cumulative_constraints=0)
+                               node._find_cglp_cut, cglp_cumulative_constraints=0)
         self.assertRaisesRegex(AssertionError, 'cglp_cumulative_bounds is bool',
-                               node._add_cglp_cut, cglp_cumulative_bounds=0)
+                               node._find_cglp_cut, cglp_cumulative_bounds=0)
 
         # check function calls
-        with patch.object(node.cglp, 'solve') as s:
-            s.return_value = (None, None)
-            self.assertRaisesRegex(AssertionError, 'should get solution', node._add_cglp_cut)
+        # with patch.object(node.cglp, 'solve') as s:
+        #     s.return_value = (None, None)
+        #     self.assertRaisesRegex(AssertionError, 'should get solution', node._add_cglp_cut)
 
     def test_add_cglp_cut(self):
         bb = BranchAndBound(self.cut1_std)
@@ -248,7 +248,7 @@ class TestNode(TestModels):
         with patch.object(node.cglp, 'solve') as s:
             # check what happens if constraint coefs are 0
             s.return_value = (CyLPArray(np.zeros(2)), pi0)
-            rtn = node._add_cglp_cut()
+            rtn = node._find_cglp_cut()
             self.assertTrue(s.called)
             # make sure no cut was added
             self.assertTrue(len(node.lp.constraints) == 1)
@@ -257,7 +257,7 @@ class TestNode(TestModels):
 
             # check otherwise
             s.return_value = (pi, pi0)
-            node._add_cglp_cut()
+            node._find_cglp_cut()
             self.assertTrue(s.called)
             # make sure the cut was added
             self.assertTrue(len(node.lp.constraints) == 2)
@@ -266,10 +266,10 @@ class TestNode(TestModels):
             np.testing.assert_allclose(node.lp.constraints[1].varCoefs[x], pi)
 
         # check returns
-        cut = node._add_cglp_cut()
+        cut = node._find_cglp_cut()
         self.assertTrue(isinstance(cut, CyLPExpr), 'should return CyLPExpr')
-        cut = node._add_cglp_cut(cglp_cumulative_constraints=True,
-                                 cglp_cumulative_bounds=True)
+        cut = node._find_cglp_cut(cglp_cumulative_constraints=True,
+                                  cglp_cumulative_bounds=True)
         self.assertFalse(cut)
 
     # test after fixing branch and bound tests

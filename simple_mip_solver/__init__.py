@@ -3,7 +3,8 @@ from simple_mip_solver.algorithms.branch_and_bound import BranchAndBound
 from simple_mip_solver.nodes.search.depth_first import DepthFirstSearchNode
 from simple_mip_solver.nodes.branch.pseudo_cost import PseudoCostBranchNode
 from simple_mip_solver.nodes.bound.cutting_plane import CuttingPlaneBoundNode
-from simple_mip_solver.nodes.nodes import PseudoCostBranchDepthFirstSearchNode
+from simple_mip_solver.nodes.nodes import PseudoCostBranchDepthFirstSearchNode, \
+    CuttingPlaneBoundPseudoCostBranchNode
 from simple_mip_solver.algorithms.cutting_plane import CuttingPlane
 
 __version__ = '1.3.1'

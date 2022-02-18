@@ -1,2 +1,2 @@
-epsilon = .0001
-constraint_epsilon = 1e-8
+from simple_mip_solver.utils.floating_point import variable_epsilon, \
+    min_constraint_depth, constraint_pad

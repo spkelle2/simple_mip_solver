@@ -4,7 +4,7 @@ from scipy.sparse import csc_matrix
 from typing import Tuple, TypeVar, Iterable, Union
 
 from simple_mip_solver import BranchAndBound
-from simple_mip_solver.utils import epsilon
+from simple_mip_solver.utils import min_constraint_depth
 
 CGLP = TypeVar('CGLP', bound='CutGeneratingLP')
 
@@ -47,6 +47,7 @@ class CutGeneratingLP:
         self.bb = bb
         self.root_id = root_id
         self.lp = self._create_cglp(A, b, var_lb, var_ub)
+        self.cylp_failure = False
 
     # test by making sure we get the coef matrix, bounds, and objective we would expect for the given inputs
     # for passing nothing, coef matrix, and bounds
@@ -179,7 +180,7 @@ class CutGeneratingLP:
             Tuple[Union[CyLPArray, None], Union[float, None]]:
         """ Finds the valid inequality that maximally separates x_star from the convex
         hull of the LP relaxations of each disjunctive term of the branch and bound
-        tree within <self.bb>.
+        tree within <self.bb> (If one exists and CyLP can avoid numerical errors in finding it).
 
         :param x_star: The point we want to cut off. If None, the CGLP will find a valid
         inequality that maximizes the separation of the solution of the LP relaxation
@@ -208,12 +209,15 @@ class CutGeneratingLP:
             self.lp.setBasisStatus(*starting_basis)
 
         # solve
-        self.lp.dual(startFinishOptions='x')
-        assert self.lp.getStatusCode() == 0, 'we should get optimal solution'
+        self.lp.dual()
 
-        # if we find a cut that separates x_star from the disjunction
-        if self.lp.objectiveValue <= epsilon:
-            return CyLPArray(self.lp.primalVariableSolution['pi']), \
-                   self.lp.primalVariableSolution['pi0'][0]
+        if self.lp.getStatusCode() in [0, 2]:
+            # if we find a cut that separates x_star from the disjunction meaningfully
+            # todo: move to cut generation
+            if self.lp.objectiveValue < -min_constraint_depth:
+                return CyLPArray(self.lp.primalVariableSolution['pi']), \
+                       self.lp.primalVariableSolution['pi0'][0]
         else:
-            return None, None
+            # CGLP always has a solution. CyLP messed up if it claims not. See test_utils.py for proof.
+            self.cylp_failure = True
+        return None, None

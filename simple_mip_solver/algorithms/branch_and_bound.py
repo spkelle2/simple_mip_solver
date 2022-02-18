@@ -355,7 +355,7 @@ class BranchAndBound(BaseAlgorithm):
         new_lp.setBasisStatus(orig_var_status, orig_slack_status)
 
         # rerun and reassign
-        new_lp.dual(startFinishOptions='x')
+        new_lp.dual()
         return new_lp
 
 

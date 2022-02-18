@@ -269,8 +269,8 @@ class TestNode(TestModels):
         node = BaseNode(small_branch.lp, small_branch.integerIndices, 0)
         self.assertTrue(node._is_fractional(5.5))
         self.assertFalse(node._is_fractional(5))
-        self.assertFalse(node._is_fractional(5.999999))
-        self.assertFalse(node._is_fractional(5.000001))
+        self.assertFalse(node._is_fractional(5.999999999999))
+        self.assertFalse(node._is_fractional(5.000000000001))
 
     def test_get_fraction_fails_asserts(self):
         node = BaseNode(small_branch.lp, small_branch.integerIndices, 0)

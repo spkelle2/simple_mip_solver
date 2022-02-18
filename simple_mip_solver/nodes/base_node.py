@@ -6,7 +6,7 @@ from math import floor, ceil
 import numpy as np
 from typing import Union, List, TypeVar, Dict, Any
 
-from simple_mip_solver.utils import epsilon
+from simple_mip_solver.utils import variable_epsilon
 
 T = TypeVar('T', bound='BaseNode')
 
@@ -26,7 +26,7 @@ class BaseNode:
         :param idx: index of this node (e.g. in the branch and bound tree)
         :param integer_indices: indices of variables we aim to find integer solutions
         :param dual_bound: starting lower bound on optimal objective value
-        for the minimization problem in this node
+        assuming minimization problem in this node
         :param b_idx: index of the branching variable
         :param b_dir: direction of branching
         :param b_val: initial value of the branching variable
@@ -98,7 +98,7 @@ class BaseNode:
         # primal infeasibility for dual simplex via its first phase. In later nodes,
         # dual infeasibility is not possible since we start with dual feasible
         # solution
-        self.lp.dual(startFinishOptions='x')
+        self.lp.dual()
         self.lp_feasible = self.lp.getStatusCode() in [0, 2]  # optimal or dual infeasible
         self.unbounded = self.lp.getStatusCode() == 2
         self.objective_value = self.lp.objectiveValue if self.lp_feasible else float('inf')
@@ -108,7 +108,7 @@ class BaseNode:
             type(sol) == dict else sol
         int_var_vals = None if not self.lp_feasible else self.solution[self._integer_indices]
         self.mip_feasible = self.lp_feasible and \
-            np.max(np.abs(np.round(int_var_vals) - int_var_vals)) < epsilon
+                            np.max(np.abs(np.round(int_var_vals) - int_var_vals)) <= variable_epsilon
 
     def bound(self: T, **kwargs: Any) -> Dict[str, Any]:
         self._base_bound()
@@ -194,7 +194,7 @@ class BaseNode:
                  if k in ['left', 'right']}
         for n in nodes.values():
             n.lp.maxNumIteration = iterations
-            n.lp.dual(startFinishOptions='x')
+            n.lp.dual()
         return nodes
 
     def _is_fractional(self: T, value: Union[int, float]) -> bool:
@@ -204,7 +204,7 @@ class BaseNode:
         :return: boolean of value is fractional
         """
         assert isinstance(value, (int, float)), 'value should be a number'
-        return min(value - floor(value), ceil(value) - value) > epsilon
+        return min(value - floor(value), ceil(value) - value) > variable_epsilon
 
     @staticmethod
     def _get_fraction(value: Union[int, float]) -> Union[int, float]:
@@ -213,6 +213,7 @@ class BaseNode:
         :param value: value to return decimal part from
         :return: decimal part of value
         """
+        # todo: add an epsilon here like cuppy.cuttingPlanes#70
         assert isinstance(value, (int, float)), 'value should be a number'
         return value - floor(value)
 
@@ -227,7 +228,7 @@ class BaseNode:
         value
         """
         furthest_index = None
-        furthest_dist = epsilon
+        furthest_dist = variable_epsilon
         if self.lp_feasible:
             for idx in self._integer_indices:
                 dist = min(self.solution[idx] - floor(self.solution[idx]),
