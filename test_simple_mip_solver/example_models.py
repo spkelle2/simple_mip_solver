@@ -277,6 +277,28 @@ l = CyLPArray([0, 0])
 square = MILPInstance(A=A, b=b, c=c, l=l, sense=['Max', '<='],
                       integerIndices=[0, 1], numVars=2)
 
+# ----------------------------- negative instance ------------------------------
+A = np.matrix([[1, 0],
+               [0, 1]])
+b = CyLPArray([[-.5],
+               [.5]])
+c = CyLPArray([1, 1])
+l = CyLPArray([-1, -1])
+negative = MILPInstance(A=A, b=b, c=c, l=l, sense=['Max', '<='],
+                        integerIndices=[0, 1], numVars=2)
+
+# ------------------------- model to test gomory cuts --------------------------
+A = np.matrix([[-3, -4],
+               [-5, -10],
+               [-1, -2]])
+b = CyLPArray([[-10],
+               [-8],
+               [-1.2]])
+c = CyLPArray([-8, -12])
+l = CyLPArray([0, 0])
+cut3 = MILPInstance(A=A, b=b, c=c, l=l, sense=['Min', '>='],
+                    integerIndices=[0, 1], numVars=2)
+
 if __name__ == '__main__':
     generate_random_variety(scale=4)
     # generate_random_value_functions()

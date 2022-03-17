@@ -2,11 +2,17 @@ from __future__ import annotations
 
 from cylp.cy.CyClpSimplex import CyClpSimplex
 from cylp.py.modeling.CyLPModel import CyLPArray
-from math import floor, ceil
+from math import floor, ceil, degrees, acos
 import numpy as np
-from typing import Union, List, TypeVar, Dict, Any
+import re
+from statistics import median
+from typing import Union, List, TypeVar, Dict, Any, Tuple
 
-from simple_mip_solver.utils import variable_epsilon
+from simple_mip_solver.utils.floating_point import numerically_safe_cut
+from simple_mip_solver.utils.tolerance import variable_epsilon,\
+    good_coefficient_approximation_epsilon, max_nonzero_coefs, parallel_cut_tolerance, \
+    cutting_plane_progress_tolerance, max_cut_generation_iterations
+from test_simple_mip_solver.test_utils.test_utils import check_cut
 
 T = TypeVar('T', bound='BaseNode')
 
@@ -64,8 +70,7 @@ class BaseNode:
         self.lp = lp
         self._integer_indices = integer_indices
         self.idx = idx
-        self._var_indices = list(range(lp.nVariables))
-        self._row_indices = list(range(lp.nConstraints))
+        # test removing var and row indices
         self.dual_bound = dual_bound
         self.objective_value = None
         self.solution = None
@@ -82,8 +87,26 @@ class BaseNode:
         ancestors = ancestors or tuple()
         idx_tuple = (idx,) if idx is not None else tuple()
         self.lineage = ancestors + idx_tuple or None  # test all 4 ways this can pan out
+        self.cut_generation_iterations = 0
+        self.cut_name_pattern = re.compile('^cut_')
+        self.cut_generation_stalled = False
 
-    def _base_bound(self: T) -> None:
+    def bound(self: T, **kwargs: Any) -> Dict[str, Any]:
+        self._base_bound(**kwargs)
+        return {}
+
+    def _base_bound(self: T, max_cut_generation_iterations: int = max_cut_generation_iterations,
+                    **kwargs) -> None:
+        assert isinstance(max_cut_generation_iterations, int) and max_cut_generation_iterations > 0, \
+            'max_cut_generation_iterations must be a positive integer'
+
+        self._bound_lp()
+        if self.lp_feasible:
+            while not self.mip_feasible and not self.cut_generation_stalled and \
+                    self.cut_generation_iterations < max_cut_generation_iterations:
+                self._cut_generation_iteration(**kwargs)
+
+    def _bound_lp(self: T) -> None:
         """Solve the current node with simplex to generate a bound on objective
         values of integer feasible solutions of descendent nodes. If feasible,
         save the run solution.
@@ -92,12 +115,6 @@ class BaseNode:
         algorithm expects
         """
         assert self._x_only_variable, 'x must be our only variable'
-        # I make the assumption here that dual infeasible implies primal unbounded.
-        # I know this isn't always true, but I am making the educated guess that
-        # cylp would have to find a dual infeasibility at the root node before a
-        # primal infeasibility for dual simplex via its first phase. In later nodes,
-        # dual infeasibility is not possible since we start with dual feasible
-        # solution
         self.lp.dual()
         self.lp_feasible = self.lp.getStatusCode() in [0, 2]  # optimal or dual infeasible
         self.unbounded = self.lp.getStatusCode() == 2
@@ -110,9 +127,212 @@ class BaseNode:
         self.mip_feasible = self.lp_feasible and \
                             np.max(np.abs(np.round(int_var_vals) - int_var_vals)) <= variable_epsilon
 
-    def bound(self: T, **kwargs: Any) -> Dict[str, Any]:
-        self._base_bound()
-        return {}
+    def _cut_generation_iteration(self: T, **kwargs: Any) -> None:
+        """ Generate cuts to refine the current LP relaxation
+
+        :param max_cut_generation_iterations: number of rounds of cut generation to perform
+        :param kwargs: dictionary of arguments to pass on to selected subroutines
+        :return: dictionary of cuts that can be added to other instances
+        """
+        assert self.lp_feasible, 'must have feasible lp to do cut generation'
+        assert all(self.solution > -variable_epsilon), 'we must have x >= 0'
+
+        self.cut_generation_iterations += 1
+        prev_objective_value = self.objective_value
+        # bring up anything close to 0 to avoid numerical errors
+        self.solution = np.maximum(self.solution, 0)
+
+        self._remove_slack_cuts(**kwargs)
+        cut_pool = self._generate_cuts(**kwargs)
+        self._select_cuts(cut_pool=cut_pool, **kwargs)
+        self._bound_lp()
+        assert self.lp_feasible, 'cuts should not change lp feasibility'
+        if abs(prev_objective_value - self.objective_value)/abs(prev_objective_value) < \
+                cutting_plane_progress_tolerance:
+            self.cut_generation_stalled = True
+
+    def _remove_slack_cuts(self: T, **kwargs) -> None:
+        """ Removes all previously added cutting planes with 0 dual value. I.e.
+        removes all cutting planes that wont change the optimal objective
+
+        :param kwargs:
+        :return:
+        """
+        removable_idxs = [constr_name for constr_name, dual_values in
+                          self.lp.dualConstraintSolution.items() if all(dual_values == 0)
+                          and self.cut_name_pattern.match(constr_name)]
+        for idx in removable_idxs:
+            self.lp.removeConstraint(idx)
+
+    def _generate_cuts(self: T, gomory_cuts: bool = True, **kwargs) -> \
+            Dict[str: Union[CyLPArray, float]]:
+        """ Generates one round of cuts
+
+        :param gomory_cuts: if True, add gomory cuts to LP relaxation
+        :param kwargs: dictionary of arguments to pass on to selected subroutines
+        :return: dictionary of cuts that can be added to the LP relaxation
+        """
+        assert isinstance(gomory_cuts, bool), 'gomory_cuts is boolean'
+
+        cut_pool = {}
+
+        if gomory_cuts:
+            # if self.idx == 0 and self.cut_generation_iterations == 2:
+            #     print()  # check row index 1
+            for row_idx, (pi, pi0) in self._find_gomory_cuts().items():
+                idx = f'cut_gomory_{self.idx}_{self.cut_generation_iterations}_{row_idx}'
+                safe_pi, safe_pi0 = numerically_safe_cut(pi=pi, pi0=pi0, estimate='over')
+                # check_cut([1, 0], self.lp, safe_pi, safe_pi0)
+                cut_pool[idx] = safe_pi, safe_pi0
+
+        return cut_pool
+
+    def _select_cuts(self, cut_pool: Dict[str: Union[CyLPArray, float]] = None,
+                     max_nonzero_coefs: int = max_nonzero_coefs,
+                     parallel_cut_tolerance: float = parallel_cut_tolerance,
+                     **kwargs) -> Dict[str, Union[CyLPArray, float]]:
+        """ Pick the best subset of cuts from the cut pool. Best is defined by
+        deepest cuts that are not too parallel to one another.
+
+        :param cut_pool: dictionary of cuts that can be added
+        :param kwargs: dictionary of arguments to pass on to selected subroutines
+        :return: dictionary of cuts chosen to be added
+        """
+        cut_pool = cut_pool or {}
+        for idx, (pi, pi0) in cut_pool.items():
+            assert isinstance(pi, CyLPArray), 'pi must be CyLPArray'
+            assert isinstance(pi0, (int, float)), 'pi0 must be number'
+        assert isinstance(max_nonzero_coefs, int) and 0 < max_nonzero_coefs, \
+            'max_nonzero_coefs must be positive int'
+        assert 0 < parallel_cut_tolerance <= 90, \
+            'parallel_cut_tolerance must be number in (0, 90]'
+
+        def nonzero_coefs(pi):
+            return sum((pi > good_coefficient_approximation_epsilon) +
+                       (pi < -good_coefficient_approximation_epsilon))
+
+        # use euclidean distance on cut to normalize for different coef scales
+        # to avoid numerical errors ensure reasonable amount of nonzero coefs
+        cut_depths = {idx: (np.dot(pi, self.solution) - pi0) / np.linalg.norm(pi)
+                      for idx, (pi, pi0) in cut_pool.items() if
+                      0 < nonzero_coefs(pi) <= max_nonzero_coefs}
+        added_cuts = {}
+
+        # add cuts in order of depth of violation
+        for idx in sorted(cut_depths, key=cut_depths.get):
+            # if cuts are no longer violated by current optimal solution, break
+            if cut_depths[idx] >= 0:
+                break
+            (pi, pi0) = cut_pool[idx]
+            parallel_cut = False
+            # select most useful cuts by ensuring >10 degrees between this cut and others added
+            for pi_prime, pi0_prime in added_cuts.values():
+                # take the median to avoid floating point error causing arc cos to fail
+                cos_theta = median(
+                    [-1, np.dot(pi, pi_prime) / (np.linalg.norm(pi) * np.linalg.norm(pi_prime)), 1]
+                )
+                if degrees(acos(cos_theta)) < parallel_cut_tolerance:
+                    parallel_cut = True
+                    break
+            if not parallel_cut:
+                cut = pi * self.lp.getVarByName('x') >= pi0
+                self.lp.addConstraint(cut, idx)
+                added_cuts[idx] = (pi, pi0)
+
+        return added_cuts  # not needed in cut generation routine but helpful for testing
+
+    def _find_gomory_cuts(self: T) -> Dict[int: Tuple[CyLPArray, float]]:
+        """Find Gomory Mixed Integer Cuts (GMICs) for this node's solution.
+        Defined in Lehigh University ISE 418 lecture 14 slide 18 and 5.31
+        in Conforti et al Integer Programming. Assumes Ax >= b and x >= 0.
+
+        Warning: this method does not currently work. It creates some cuts that
+        are invalid. Stuck on debugging because I can't spot the difference between
+        this and what is referenced above.
+
+        :return: a dict of tuples (pi, pi0) that represent the cut pi*x >= pi0.
+        Each tuple is indexed by the row in the LP tableau that generated the cut
+        """
+        cuts = {}
+        tableau = self.tableau
+        for row_idx, basic_idx in enumerate(self.basic_variable_indices):
+            if basic_idx in self._integer_indices and \
+                    self._is_fractional(self.solution[basic_idx]):
+                f0 = self._get_fraction(self.solution[basic_idx])
+                # if whole number or close, skip to avoid numerical issues from division
+                if f0 < good_coefficient_approximation_epsilon or \
+                        f0 + good_coefficient_approximation_epsilon > 1:
+                    continue
+                # 0 for basic variables avoids getting small numbers that should be zero
+                f = {i: 0 if i in self.basic_variable_indices else
+                     self._get_fraction(tableau[row_idx, i]) for i in
+                     range(self.lp.nVariables)}
+                # values for continuous variables
+                a = {i: 0 if i in self.basic_variable_indices else tableau[row_idx, i]
+                     for i in range(self.lp.nVariables)}
+                # primary variable coefficients in GMI cut
+                pi = CyLPArray(
+                    [f[j]/f0 if f[j] <= f0 and j in self._integer_indices else
+                     (1 - f[j])/(1 - f0) if j in self._integer_indices else
+                     a[j]/f0 if a[j] > 0 else -a[j]/(1 - f0) for j in range(self.lp.nVariables)]
+                )
+                # slack variable coefficients in GMI cut
+                pi_slacks = np.array([x/f0 if x > 0 else -x/(1 - f0) for x in
+                                      tableau[row_idx, self.lp.nVariables:]])
+                # sub out slack variables for primary variables. Ax >= b =>
+                # Ax - s = b => s = Ax - b. gomory is pi^T * x + pi_s^T * s >= 1, thus
+                # pi^T * x + pi_s^T * (Ax - b) >= 1 => (pi + A^T * pi_s)^T * x >= 1 + pi_s^T * b
+                coefs = pi + self.lp.coefMatrix.T * pi_slacks
+                rhs = 1 + np.dot(pi_slacks, self.lp.constraintsLower)
+                # append coefs^T * x >= rhs
+                cuts[row_idx] = (coefs, rhs)
+        return cuts
+
+    @property
+    def tableau(self):
+        """CyLP builds the tableau incorrectly, so building from scratch. Assumes Ax >= b"""
+        B = self.basic_variable_indices
+        assert len(B) == self.lp.nConstraints, "There should be nConstrs basic variables"
+        A = np.concatenate((self.lp.coefMatrix.toarray(), -np.identity(self.lp.nConstraints)), axis=1)
+        A_B = A[:, B]
+        A_B_inv = np.linalg.inv(A_B)
+        return A_B_inv @ A
+    
+    @property
+    def basic_variable_indices(self):
+        return np.where(np.concatenate(self.lp.getBasisStatus()) == 1)[0]
+
+    def branch(self: T, **kwargs: Any) -> Dict[str, T]:
+        """ Creates two new nodes which are branched on the most fractional index
+        of this node's LP relaxation solution
+
+        :param kwargs: a dictionary to hold unneeded arguments sent by a general
+        branch and bound method
+        :return: list of Nodes with the new bounds
+        """
+        branch_idx = self._most_fractional_index
+        return self._base_branch(branch_idx, **kwargs)
+
+    # implementation of most fractional branch
+    @property
+    def _most_fractional_index(self: T) -> int:
+        """ Returns the index of the integer variable with current value furthest from
+        being integer. If one does not exist or the problem has not yet been solved,
+        returns None.
+
+        :return furthest_index: index corresponding to variable with most fractional
+        value
+        """
+        furthest_index = None
+        furthest_dist = variable_epsilon
+        if self.lp_feasible:
+            for idx in self._integer_indices:
+                dist = min(self.solution[idx] - floor(self.solution[idx]),
+                           ceil(self.solution[idx]) - self.solution[idx])
+                if dist > furthest_dist:
+                    furthest_dist = dist
+                    furthest_index = idx
+        return furthest_index
 
     def _base_branch(self: T, branch_idx: int, next_node_idx: int = None,
                      **kwargs: Any) -> Dict[str, T]:
@@ -213,41 +433,8 @@ class BaseNode:
         :param value: value to return decimal part from
         :return: decimal part of value
         """
-        # todo: add an epsilon here like cuppy.cuttingPlanes#70
         assert isinstance(value, (int, float)), 'value should be a number'
         return value - floor(value)
-
-    # implementation of most fractional branch
-    @property
-    def _most_fractional_index(self: T) -> int:
-        """ Returns the index of the integer variable with current value furthest from
-        being integer. If one does not exist or the problem has not yet been solved,
-        returns None.
-
-        :return furthest_index: index corresponding to variable with most fractional
-        value
-        """
-        furthest_index = None
-        furthest_dist = variable_epsilon
-        if self.lp_feasible:
-            for idx in self._integer_indices:
-                dist = min(self.solution[idx] - floor(self.solution[idx]),
-                           ceil(self.solution[idx]) - self.solution[idx])
-                if dist > furthest_dist:
-                    furthest_dist = dist
-                    furthest_index = idx
-        return furthest_index
-
-    def branch(self: T, **kwargs: Any) -> Dict[str, T]:
-        """ Creates two new nodes which are branched on the most fractional index
-        of this node's LP relaxation solution
-
-        :param kwargs: a dictionary to hold unneeded arguments sent by a general
-        branch and bound method
-        :return: list of Nodes with the new bounds
-        """
-        branch_idx = self._most_fractional_index
-        return self._base_branch(branch_idx, **kwargs)
 
     # implementation of best first search
     def __eq__(self: T, other):

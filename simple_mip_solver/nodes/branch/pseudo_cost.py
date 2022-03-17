@@ -3,7 +3,7 @@ from math import floor, ceil
 from typing import List, Dict, Union, Any, TypeVar
 
 from simple_mip_solver.nodes.base_node import BaseNode
-from simple_mip_solver.utils import variable_epsilon
+from simple_mip_solver.utils.tolerance import variable_epsilon
 
 T = TypeVar('T', bound='PseudoCostBranchNode')
 pseudo_costs_hint = Dict[int, Dict[str, Dict[str, Union[float, int]]]]
@@ -57,8 +57,6 @@ class PseudoCostBranchNode(BaseNode):
                       self._is_fractional(self.solution[idx])
                       and idx not in self.pseudo_costs]
         for idx in sb_indices:
-            if idx == 13:
-                print()
             for strong_branch_node in self._strong_branch(idx, self.strong_branch_iters).values():
                 self._calculate_costs(strong_branch_node)
 

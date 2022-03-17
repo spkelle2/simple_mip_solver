@@ -10,8 +10,6 @@ from test_simple_mip_solver.helpers import TestModels
 
 class TestNode(TestModels):
 
-    Node = PseudoCostBranchNode
-
     def setUp(self) -> None:
         self.kwargs = {'pseudo_costs': {}}
 
@@ -220,6 +218,9 @@ class TestNode(TestModels):
         err = node._check_pseudo_costs(pc)[0]
         self.assertTrue(err == 'index 15 not integer index',
                         "pc[15] should error")
+
+    # node type to use in base_test_models
+    Node = PseudoCostBranchNode
 
     def test_models(self):
         self.base_test_models()

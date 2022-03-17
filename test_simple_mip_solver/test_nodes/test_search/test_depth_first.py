@@ -9,8 +9,6 @@ from test_simple_mip_solver.helpers import TestModels
 
 class TestNode(TestModels):
 
-    Node = DepthFirstSearchNode
-
     def test_init(self):
         node = DepthFirstSearchNode(small_branch.lp, small_branch.integerIndices)
         self.assertTrue(node.search_method == 'depth first')
@@ -38,6 +36,8 @@ class TestNode(TestModels):
         self.assertTrue(node3 == node2)
         self.assertFalse(node1 == node2)
         self.assertRaises(TypeError, node1.__eq__, 5)
+
+    Node = DepthFirstSearchNode
 
     def test_models(self):
         self.base_test_models()

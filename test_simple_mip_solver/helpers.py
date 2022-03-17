@@ -25,7 +25,7 @@ class TestModels(unittest.TestCase):
 
     Node = None
 
-    def base_test_models(self, standardize_model=False):
+    def base_test_models(self, **kwargs):
         self.assertTrue(gu, 'gurobipy needed for this test')
         fldr = os.path.join(
             os.path.dirname(os.path.abspath(inspect.getfile(generate_random_variety))),
@@ -34,12 +34,12 @@ class TestModels(unittest.TestCase):
         for i, file in enumerate(os.listdir(fldr)):
             print(f'running test {i + 1}')
             pth = os.path.join(fldr, file)
-            model = MILPInstance(file_name=pth)
-            bb = BranchAndBound(model, self.Node, pseudo_costs={})
-            bb.solve()
             gu_mdl = gu.read(pth)
             gu_mdl.setParam(gu.GRB.Param.LogToConsole, 0)
             gu_mdl.optimize()
+            model = MILPInstance(file_name=pth)
+            bb = BranchAndBound(model, self.Node, pseudo_costs={}, **kwargs)
+            bb.solve()
             if not isclose(bb.objective_value, gu_mdl.objVal, abs_tol=.01):
                 print(f'different for {file}')
                 print(f'mine: {bb.objective_value}')
