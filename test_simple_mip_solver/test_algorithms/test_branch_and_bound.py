@@ -3,11 +3,9 @@ from cylp.cy.CyClpSimplex import CyClpSimplex, CyLPArray
 import inspect
 from math import isclose
 import numpy as np
-from numpy.testing import assert_allclose
 import os
 from queue import PriorityQueue
 import re
-import sys
 import unittest
 from unittest.mock import patch
 
@@ -15,11 +13,9 @@ from simple_mip_solver import BaseNode, BranchAndBound, \
     PseudoCostBranchDepthFirstSearchNode as PCBDFSNode, PseudoCostBranchNode
 from simple_mip_solver.algorithms.branch_and_bound import BranchAndBoundTree
 from simple_mip_solver.algorithms.base_algorithm import BaseAlgorithm
-from simple_mip_solver.nodes.bound.cutting_plane import CuttingPlaneBoundNode
 from simple_mip_solver.utils.cut_generating_lp import CutGeneratingLP
 from test_simple_mip_solver.example_models import no_branch, small_branch, infeasible, \
-    unbounded, infeasible2, h3p1, h3p1_0, h3p1_1, h3p1_2, h3p1_3, h3p1_4, h3p1_5, square, \
-    generate_random_variety
+    unbounded, infeasible2, h3p1, h3p1_0, h3p1_1, h3p1_2, h3p1_3, h3p1_4, h3p1_5
 from test_simple_mip_solver import example_models
 
 
@@ -56,7 +52,7 @@ class TestBranchAndBoundTree(unittest.TestCase):
                                bb.tree.get_node_instances, [0])
 
     def test_get_node_instances(self):
-        bb = BranchAndBound(small_branch)
+        bb = BranchAndBound(small_branch, gomory_cuts=False)
         bb.solve()
 
         # test list
@@ -135,7 +131,7 @@ class TestBranchAndBound(unittest.TestCase):
                                model=small_branch, right=-5)
 
     def test_current_gap(self):
-        bb = BranchAndBound(small_branch, node_limit=1)
+        bb = BranchAndBound(small_branch, node_limit=1, gomory_cuts=False)
         bb.solve()
         self.assertTrue(bb.current_gap is None)
         bb.node_limit = 10
@@ -157,7 +153,8 @@ class TestBranchAndBound(unittest.TestCase):
     def test_solve_stopped_on_iterations(self):
         # check and make sure we're good with both nodes
         for Node in [BaseNode, PCBDFSNode]:
-            bb = BranchAndBound(small_branch, Node=Node, node_limit=1, pseudo_costs={})
+            bb = BranchAndBound(small_branch, Node=Node, node_limit=1, pseudo_costs={},
+                                gomory_cuts=False)
             bb.solve()
             self.assertTrue(bb.status == 'stopped on iterations or time')
             self.assertTrue(bb.solve_time)
@@ -230,7 +227,7 @@ class TestBranchAndBound(unittest.TestCase):
 
     def test_evaluate_node_fractional(self):
         bb = BranchAndBound(small_branch, Node=PCBDFSNode, pseudo_costs={},
-                            strong_branch_iters=5)
+                            strong_branch_iters=5, gomory_cuts=False)
         bb._evaluate_node(bb.root_node)
 
         # check attributes
@@ -387,7 +384,7 @@ class TestBranchAndBound(unittest.TestCase):
                 self.assertTrue(node.lp.constraints[1].name == 'node_0_cglp_cut')
 
     def test_find_dual_bound_fails_asserts(self):
-        bb = BranchAndBound(small_branch)
+        bb = BranchAndBound(small_branch, gomory_cuts=False)
         self.assertRaisesRegex(AssertionError, 'must solve this instance before',
                                bb.find_dual_bound, CyLPArray([2.5, 4.5]))
         bb.solve()
@@ -406,7 +403,7 @@ class TestBranchAndBound(unittest.TestCase):
 
         # Ensure that BranchAndBound.find_dual_bound generates the dual function
         # that we saw in ISE 418 HW 3 problem 1
-        bb = BranchAndBound(h3p1)
+        bb = BranchAndBound(h3p1, gomory_cuts=False)
         bb.solve()
         bound = bb.find_dual_bound(CyLPArray([3.5, -3.5]))
         self.assertTrue(bb.objective_value == bound, 'dual should be strong at original rhs')
@@ -425,7 +422,7 @@ class TestBranchAndBound(unittest.TestCase):
             self.assertTrue(bound <= new_bb.objective_value + .01,
                             'dual bound value should be at most the value function for this rhs')
 
-        bb = BranchAndBound(small_branch)
+        bb = BranchAndBound(small_branch, gomory_cuts=False)
         bb.solve()
         bound = bb.find_dual_bound(CyLPArray([2.5, 4.5]))
 
@@ -434,7 +431,7 @@ class TestBranchAndBound(unittest.TestCase):
                         'dual bound value should be at most the value function for this rhs')
 
         # check function calls
-        bb = BranchAndBound(small_branch)
+        bb = BranchAndBound(small_branch, gomory_cuts=False)
         bb.solve()
         bound_duals = [bb._bound_dual(n.lp) for n in bb.tree.get_node_instances([6, 12, 10, 8, 2])]
         with patch.object(bb, '_bound_dual') as bd:
@@ -442,7 +439,7 @@ class TestBranchAndBound(unittest.TestCase):
             bound = bb.find_dual_bound(CyLPArray([3, 3]))
             self.assertTrue(bd.call_count == 5)
 
-        bb = BranchAndBound(small_branch)
+        bb = BranchAndBound(small_branch, gomory_cuts=False)
         bb.solve()
         bound = bb.find_dual_bound(CyLPArray([3, 3]))
         with patch.object(bb, '_bound_dual') as bd:
@@ -461,7 +458,8 @@ class TestBranchAndBound(unittest.TestCase):
             for file in os.listdir(sub_fldr_pth):
                 eval_num = int(pattern.search(file).group(1))
                 instance = MILPInstance(file_name=os.path.join(sub_fldr_pth, file))
-                bb = BranchAndBound(instance, PseudoCostBranchNode, pseudo_costs={})
+                bb = BranchAndBound(instance, PseudoCostBranchNode, pseudo_costs={},
+                                    gomory_cuts=False)
                 bb.solve()
                 evals[eval_num] = bb
             instance_0 = evals[0]
