@@ -4,16 +4,10 @@ from scipy.sparse import csc_matrix
 from typing import Tuple, TypeVar, Iterable, Union
 
 from simple_mip_solver import BranchAndBound
-from simple_mip_solver.utils import min_constraint_depth
 
 CGLP = TypeVar('CGLP', bound='CutGeneratingLP')
 
 
-# add this as an attribute to each CuttingPlaneNode
-# If not updating constraints or bounds, just copy the CGLP object during branching
-# else create a new CGLP during branching
-# in either case, set current basis as starting_basis attribute to CuttingPlaneNode children
-# maybe make node_kwargs argument that can be passed to branching for init idk
 class CutGeneratingLP:
 
     def __init__(self: CGLP, bb: BranchAndBound, root_id: int, A: np.matrix = None,
@@ -208,16 +202,13 @@ class CutGeneratingLP:
                 'second starting_basis element should give status for exactly each slack variable in CGLP'
             self.lp.setBasisStatus(*starting_basis)
 
-        # solve
-        self.lp.dual()
+        # solve - use primal since objective is main thing changing in cutting plane method
+        self.lp.primal()
 
         if self.lp.getStatusCode() in [0, 2]:
-            # if we find a cut that separates x_star from the disjunction meaningfully
-            # todo: move to cut generation
-            if self.lp.objectiveValue < -min_constraint_depth:
-                return CyLPArray(self.lp.primalVariableSolution['pi']), \
-                       self.lp.primalVariableSolution['pi0'][0]
+            return CyLPArray(self.lp.primalVariableSolution['pi']), \
+                   self.lp.primalVariableSolution['pi0'][0]
         else:
-            # CGLP always has a solution. CyLP messed up if it claims not. See test_utils.py for proof.
+            # CGLP always has a solution. CyLP has a floating point issue in this case.
             self.cylp_failure = True
-        return None, None
+            return None, None
