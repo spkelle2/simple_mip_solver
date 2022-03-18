@@ -5,7 +5,8 @@ import unittest
 from unittest.mock import patch
 
 from simple_mip_solver.utils.floating_point import scale_cut, numerically_safe_cut, \
-    get_fraction, exact_coefficient_approximation_epsilon as eps
+    get_fraction
+from simple_mip_solver.utils.tolerance import exact_coefficient_approximation_epsilon as eps
 
 
 class TestFloatingPoint(unittest.TestCase):
@@ -24,6 +25,12 @@ class TestFloatingPoint(unittest.TestCase):
         scaled_pi, scaled_pi0 = scale_cut(pi, pi0)
         self.assertTrue(all(scaled_pi == [.25, 0, .5, -1]))
         self.assertTrue(scaled_pi0 == .75)
+
+        pi = np.array([0, 0, 0, 0])
+        pi0 = 3
+        scaled_pi, scaled_pi0 = scale_cut(pi, pi0)
+        self.assertTrue(scaled_pi is None)
+        self.assertTrue(scaled_pi0 is None)
 
     def test_numerically_safe_cut_fails_asserts(self):
         self.assertRaisesRegex(AssertionError, 'pi is a CyLPArray', numerically_safe_cut,
@@ -49,6 +56,10 @@ class TestFloatingPoint(unittest.TestCase):
             self.assertTrue(gf.call_count == 3)
             self.assertTrue(all(safe_pi == [1, 2, 4]))
             self.assertTrue(safe_pi0 == 4)
+
+        pi = CyLPArray([0, 0, 0])
+        pi0 = 3
+        safe_pi, safe_pi0 = numerically_safe_cut(pi=pi, pi0=pi0, estimate='over')
 
         # check returns
         runs = 100

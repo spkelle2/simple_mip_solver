@@ -1,17 +1,15 @@
 from cylp.cy.CyClpSimplex import CyLPArray
 from math import floor, ceil
 import numpy as np
-from typing import Tuple, List
+from typing import Tuple, Union
 import warnings
 
-variable_epsilon = 1e-4
-good_coefficient_approximation_epsilon = 1e-2  # threshold for saying fractional coef is good approximation
-exact_coefficient_approximation_epsilon = 1e-14  # threshold for considering two fractions are the same
-min_constraint_depth = 1e-4
-constraint_pad = 1e-8
+from simple_mip_solver.utils.tolerance import good_coefficient_approximation_epsilon, \
+    exact_coefficient_approximation_epsilon
 
 
-def scale_cut(pi: np.ndarray, pi0: float, max_abs: float = 1, **kwargs) -> Tuple[np.ndarray, float]:
+def scale_cut(pi: np.ndarray, pi0: float, max_abs: float = 1, **kwargs) -> \
+        Union[Tuple[np.ndarray, float], Tuple[None, None]]:
     """ Scale the input cut (pi, pi0) so that the largest absolute value of
     coefficients is max_abs
 
@@ -25,6 +23,9 @@ def scale_cut(pi: np.ndarray, pi0: float, max_abs: float = 1, **kwargs) -> Tuple
     assert isinstance(pi0, float) or isinstance(pi0, int), 'pi0 is a number'
     assert (isinstance(max_abs, int) or isinstance(max_abs, float)) and max_abs > 0, \
         'max_abs should be positive'
+
+    if min(pi) == max(pi) == 0:
+        return None, None  # can't be scaled
 
     # scale the largest element to have max absolute value max_abs
     with warnings.catch_warnings():
@@ -71,8 +72,11 @@ def numerically_safe_cut(pi: CyLPArray, pi0: float, estimate: str = 'over',
 
     nums, dens = [], []
 
-    pi, pi0 = scale_cut(pi, pi0, **kwargs)
-    for coef in pi:
+    pi_scaled, pi0_scaled = scale_cut(pi, pi0, **kwargs)
+    if pi_scaled is None:
+        return pi, pi0  # if pi == 0 then its already integer so just return
+
+    for coef in pi_scaled:
         n, d = get_fraction(coef, estimate=estimate, **kwargs)
         # if the fraction is not a good approximation, see if the exact is really close
         if coef != 0 and abs(1 - ((n/d) / coef)) > good_coefficient_approximation_epsilon:
@@ -86,7 +90,7 @@ def numerically_safe_cut(pi: CyLPArray, pi0: float, estimate: str = 'over',
     # floating point error from doing this can make a tight approximation invalid
     # but I'm betting the floating point error is small enough CLP will tolerate it
     safe_pi = CyLPArray(lcm*np.array(nums)/np.array(dens))
-    safe_pi0 = pi0*lcm
+    safe_pi0 = pi0_scaled*lcm
 
     return safe_pi, safe_pi0
 
