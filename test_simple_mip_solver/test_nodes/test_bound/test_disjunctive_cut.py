@@ -1,19 +1,7 @@
 from coinor.cuppy.milpInstance import MILPInstance
 from cylp.py.modeling.CyLPModel import CyLPArray
-import inspect
-import os
-from scipy.sparse import csc_matrix
-
-# so pulp and pyomo don't believe reading in flat files is a worthwhile feature
-# so we don't have much of an option here but to use some sort of commercial solver
-
-try:  # if you don't have gurobipy installed, all tests except those using gurobi will run
-    import gurobipy as gu
-except ImportError:
-    gu = None
-from itertools import product
-from math import isclose
 import numpy as np
+from scipy.sparse import csc_matrix
 import unittest
 from unittest.mock import patch
 
@@ -21,7 +9,7 @@ from simple_mip_solver import DisjunctiveCutBoundNode, BaseNode, BranchAndBound
 from simple_mip_solver.algorithms.base_algorithm import BaseAlgorithm
 from simple_mip_solver.utils.cut_generating_lp import CutGeneratingLP
 from test_simple_mip_solver.example_models import cut1, infeasible, no_branch, \
-    cut2, lift_project, generate_random_variety
+    cut2, lift_project
 from test_simple_mip_solver.helpers import TestModels
 
 
@@ -195,8 +183,8 @@ class TestNode(TestModels):
 
         # don't warm start
         basis = node._get_cglp_starting_basis(warm_start_cglp=False)
-        self.assertTrue((basis[0] == [3, 3]).all())
-        self.assertTrue((basis[1] == [1]*5).all())
+        self.assertTrue((basis[0] == [3]*12).all())
+        self.assertTrue((basis[1] == [1]*4).all())
 
         # warm start the cold start
         self.assertFalse(node._get_cglp_starting_basis(warm_start_cglp=True))
@@ -357,55 +345,11 @@ class TestNode(TestModels):
             self.assertTrue((kwargs['prev_cglp_basis'][1] == cglp.lp.getBasisStatus()[1]).all())
             self.assertTrue(rtn == 'rtn', 'should just return what parent branch does')
 
+    Node = DisjunctiveCutBoundNode
+
     # test after fixing branch and bound tests
     def test_models(self):
-        ratio_run = .05
-        count_different = 0
-        dif = {}
-        self.assertTrue(gu, 'gurobipy needed for this test')
-        fldr = os.path.join(
-            os.path.dirname(os.path.abspath(inspect.getfile(generate_random_variety))),
-            'example_models'
-        )
-        kwarg_values = product(*([[True, False] for _ in range(5)] + [[1, None]]))
-        kwargs_list = [
-            {'cut_generating_lp': cglp_bool, 'cglp_cumulative_constraints': cc_bool,
-            'cglp_cumulative_bounds': cb_bool, 'gomory_cuts': gc_bool} for
-            (cglp_bool, cc_bool, cb_bool, gc_bool, ws_cglp, max_cglp) in kwarg_values
-        ]
-        num_kwargs = len(kwargs_list)
-        num_fldrs = len(os.listdir(fldr))
-        for j, kwargs in enumerate(kwargs_list):
-            for i, file in enumerate(os.listdir(fldr)):
-                if np.random.uniform() > ratio_run:
-                    continue
-                print(f'running test {(i + 1) + j * num_fldrs} of {num_kwargs * num_fldrs}')
-                pth = os.path.join(fldr, file)
-
-                # check gurobi
-                gu_mdl = gu.read(pth)
-                gu_mdl.setParam(gu.GRB.Param.LogToConsole, 0)
-                gu_mdl.optimize()
-
-                # check ours
-                model = MILPInstance(file_name=pth)
-                cglp_bb = BranchAndBound(model, node_limit=8, gomory_cuts=kwargs['gomory_cuts'])
-                cglp_bb.solve()
-                cglp = CutGeneratingLP(cglp_bb, cglp_bb.root_node.idx)
-                bb = BranchAndBound(model, DisjunctiveCutBoundNode, cglp=cglp, **kwargs)
-                bb.solve()
-
-                if not isclose(bb.objective_value, gu_mdl.objVal, abs_tol=.01):
-                    print(f'different for {file}')
-                    print(f'mine: {bb.objective_value}')
-                    print(f'gurobi: {gu_mdl.objVal}')
-                    dif[i, j] = {'mine': bb.objective_value, 'gurobi': gu_mdl.objVal}
-                    count_different += 1
-                # self.assertTrue(isclose(bb.objective_value, gu_mdl.objVal, abs_tol=.01),
-                #                 f'different for {file}')
-        self.assertTrue(count_different/(num_kwargs*num_fldrs) < .02*ratio_run,
-                        'try to get less than 2% failure or less')
-        print()
+        self.disjunctive_cut_test_models()
 
 
 if __name__ == '__main__':

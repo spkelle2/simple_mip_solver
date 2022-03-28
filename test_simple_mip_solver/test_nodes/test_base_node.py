@@ -19,7 +19,7 @@ from test_simple_mip_solver.example_models import no_branch, small_branch, \
 from test_simple_mip_solver.helpers import TestModels
 
 
-class TestNode(TestModels):
+class TestBaseNode(TestModels):
 
     def setUp(self) -> None:
         # reset models each test so lps dont keep added constraints

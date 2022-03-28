@@ -91,11 +91,26 @@ class BaseNode:
         self.cut_generation_stalled = False
 
     def bound(self: T, **kwargs: Any) -> Dict[str, Any]:
+        """ Wrapper function for calling the base bound subroutine. This function
+        is here to match the bound routine in all sub classes so that they are
+        called the same
+
+        :param kwargs: dictionary of arguments to pass on to selected subroutines
+        :return:
+        """
         self._base_bound(**kwargs)
         return {}
 
     def _base_bound(self: T, max_cut_generation_iterations: int = max_cut_generation_iterations,
                     **kwargs) -> None:
+        """ bound subroutine to be shared by all superclasses. Bounds the LP
+        relaxation then calls the cut generation subroutine
+
+        :param max_cut_generation_iterations: max number of times to call
+        cut generation
+        :param kwargs: dictionary of arguments to pass on to selected subroutines
+        :return:
+        """
         assert isinstance(max_cut_generation_iterations, int) and max_cut_generation_iterations > 0, \
             'max_cut_generation_iterations must be a positive integer'
 

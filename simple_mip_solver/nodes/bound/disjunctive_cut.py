@@ -112,8 +112,8 @@ class DisjunctiveCutBoundNode(BaseNode):
         """
         assert isinstance(warm_start_cglp, bool), 'warm_start_cglp is boolean'
         if not warm_start_cglp:
-            return (np.array([3]*self.lp.nVariables, dtype=np.int32),
-                    np.array([1]*self.lp.nConstraints, dtype=np.int32))
+            return (np.array([3]*self.cglp.lp.nVariables, dtype=np.int32),
+                    np.array([1]*self.cglp.lp.nConstraints, dtype=np.int32))
         elif self.cut_generation_iterations == 1:
             return self.prev_cglp_basis
         else:
