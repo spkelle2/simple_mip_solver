@@ -12,7 +12,7 @@ from simple_mip_solver.utils.floating_point import numerically_safe_cut
 from simple_mip_solver.utils.tolerance import variable_epsilon,\
     good_coefficient_approximation_epsilon, max_nonzero_coefs, parallel_cut_tolerance, \
     cutting_plane_progress_tolerance, max_cut_generation_iterations
-from test_simple_mip_solver.test_utils.test_utils import check_cut
+from test_simple_mip_solver.test_utils.test_utils import check_cut_against_grid
 
 T = TypeVar('T', bound='BaseNode')
 
@@ -70,7 +70,6 @@ class BaseNode:
         self.lp = lp
         self._integer_indices = integer_indices
         self.idx = idx
-        # test removing var and row indices
         self.dual_bound = dual_bound
         self.objective_value = None
         self.solution = None
@@ -101,10 +100,9 @@ class BaseNode:
             'max_cut_generation_iterations must be a positive integer'
 
         self._bound_lp()
-        if self.lp_feasible:
-            while not self.mip_feasible and not self.cut_generation_stalled and \
-                    self.cut_generation_iterations < max_cut_generation_iterations:
-                self._cut_generation_iteration(**kwargs)
+        while self.lp_feasible and not self.mip_feasible and not self.cut_generation_stalled and \
+                self.cut_generation_iterations < max_cut_generation_iterations:
+            self._cut_generation_iteration(**kwargs)
 
     def _bound_lp(self: T) -> None:
         """Solve the current node with simplex to generate a bound on objective
@@ -128,25 +126,23 @@ class BaseNode:
                             np.max(np.abs(np.round(int_var_vals) - int_var_vals)) <= variable_epsilon
 
     def _cut_generation_iteration(self: T, **kwargs: Any) -> None:
-        """ Generate cuts to refine the current LP relaxation
+        """ Generate cuts to refine the current LP relaxation.
 
         :param max_cut_generation_iterations: number of rounds of cut generation to perform
         :param kwargs: dictionary of arguments to pass on to selected subroutines
         :return: dictionary of cuts that can be added to other instances
         """
-        assert self.lp_feasible, 'must have feasible lp to do cut generation'
         assert all(self.solution > -variable_epsilon), 'we must have x >= 0'
 
-        self.cut_generation_iterations += 1
-        prev_objective_value = self.objective_value
         # bring up anything close to 0 to avoid numerical errors
         self.solution = np.maximum(self.solution, 0)
+        self.cut_generation_iterations += 1
+        prev_objective_value = self.objective_value
 
         self._remove_slack_cuts(**kwargs)
         cut_pool = self._generate_cuts(**kwargs)
         self._select_cuts(cut_pool=cut_pool, **kwargs)
         self._bound_lp()
-        assert self.lp_feasible, 'cuts should not change lp feasibility'
         if abs(prev_objective_value - self.objective_value)/abs(prev_objective_value) < \
                 cutting_plane_progress_tolerance:
             self.cut_generation_stalled = True
@@ -177,12 +173,9 @@ class BaseNode:
         cut_pool = {}
 
         if gomory_cuts:
-            # if self.idx == 0 and self.cut_generation_iterations == 2:
-            #     print()  # check row index 1
             for row_idx, (pi, pi0) in self._find_gomory_cuts().items():
                 idx = f'cut_gomory_{self.idx}_{self.cut_generation_iterations}_{row_idx}'
                 safe_pi, safe_pi0 = numerically_safe_cut(pi=pi, pi0=pi0, estimate='over')
-                # check_cut([1, 0], self.lp, safe_pi, safe_pi0)
                 cut_pool[idx] = safe_pi, safe_pi0
 
         return cut_pool
@@ -235,11 +228,14 @@ class BaseNode:
                     parallel_cut = True
                     break
             if not parallel_cut:
+                # uncomment to check if cut is valid
+                # check_cut_against_grid(lp=self.lp, pi=pi, pi0=pi0, max_val=5)
                 cut = pi * self.lp.getVarByName('x') >= pi0
                 self.lp.addConstraint(cut, idx)
                 added_cuts[idx] = (pi, pi0)
 
-        return added_cuts  # not needed in cut generation routine but helpful for testing
+        # not needed in cut generation routine but helpful for testing
+        return added_cuts
 
     def _find_gomory_cuts(self: T) -> Dict[int: Tuple[CyLPArray, float]]:
         """Find Gomory Mixed Integer Cuts (GMICs) for this node's solution.
@@ -255,6 +251,8 @@ class BaseNode:
         """
         cuts = {}
         tableau = self.tableau
+        if tableau is None:
+            return cuts
         for row_idx, basic_idx in enumerate(self.basic_variable_indices):
             if basic_idx in self._integer_indices and \
                     self._is_fractional(self.solution[basic_idx]):
@@ -292,7 +290,9 @@ class BaseNode:
     def tableau(self):
         """CyLP builds the tableau incorrectly, so building from scratch. Assumes Ax >= b"""
         B = self.basic_variable_indices
-        assert len(B) == self.lp.nConstraints, "There should be nConstrs basic variables"
+        # There should be nConstrs basic variables but sometimes CyLP confuses itself
+        if len(B) != self.lp.nConstraints:
+            return None
         A = np.concatenate((self.lp.coefMatrix.toarray(), -np.identity(self.lp.nConstraints)), axis=1)
         A_B = A[:, B]
         A_B_inv = np.linalg.inv(A_B)

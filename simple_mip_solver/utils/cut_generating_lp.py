@@ -194,8 +194,8 @@ class CutGeneratingLP:
             assert isinstance(starting_basis, Iterable) and not isinstance(starting_basis, str) \
                 and len(starting_basis) == 2, 'starting basis must be an iterable with two elements'
             for status_array in starting_basis:
-                assert isinstance(status_array, Iterable) and not isinstance(status_array, str), \
-                    'elements of starting basis must be iterables'
+                assert isinstance(status_array, np.ndarray), \
+                    'elements of starting basis must be np.ndarrays'
             assert starting_basis[0].shape == (self.lp.nVariables,), \
                 'first starting_basis element should give status for exactly each decision variable in CGLP'
             assert starting_basis[1].shape == (self.lp.nConstraints,), \

@@ -126,14 +126,16 @@ class TestNode(TestModels):
     def test_base_bound(self):
         node = BaseNode(infeasible.lp, infeasible.integerIndices)
 
-        def patch_cgi_iter():
+        def patch_cgi_failed_iter():
             node.cut_generation_iterations += 1
+            node.lp_feasible = False
 
         # check function calls
         # infeasible lp
         with patch.object(node, '_bound_lp') as bl, \
-                patch.object(node, '_cut_generation_iteration', new=patch_cgi_iter) as cgi:
+                patch.object(node, '_cut_generation_iteration', new=patch_cgi_failed_iter) as cgi:
 
+            # initially infeasible
             node.lp_feasible = False
             node.mip_feasible = False
 
@@ -141,6 +143,20 @@ class TestNode(TestModels):
 
             self.assertTrue(bl.called)
             self.assertFalse(node.cut_generation_iterations)  # would be 1 if mock called
+
+            # infeasible after a cut generation iteration
+            node.lp_feasible = True
+            max_iters = 3
+            node._base_bound(max_cut_generation_iterations=max_iters)
+            # should get called once and then stopped
+            self.assertTrue(bl.call_count == 2)
+            self.assertFalse(node.lp_feasible)
+            self.assertFalse(node.mip_feasible)
+            self.assertFalse(node.cut_generation_stalled)
+            self.assertTrue(node.cut_generation_iterations == 1)
+
+        def patch_cgi_iter():
+            node.cut_generation_iterations += 1
 
         # feasible lp but infeasible mip stop on iterations
         with patch.object(node, '_bound_lp') as bl, \
@@ -151,6 +167,7 @@ class TestNode(TestModels):
             node._base_bound(max_cut_generation_iterations=max_cut_generation_iterations)
 
             self.assertTrue(bl.called)
+            self.assertTrue(node.lp_feasible)
             self.assertFalse(node.mip_feasible)
             self.assertFalse(node.cut_generation_stalled)
             self.assertTrue(node.cut_generation_iterations == max_cut_generation_iterations)
@@ -167,6 +184,7 @@ class TestNode(TestModels):
             node._base_bound(max_cut_generation_iterations=max_cut_generation_iterations)
 
             self.assertTrue(bl.called)
+            self.assertTrue(node.lp_feasible)
             self.assertFalse(node.mip_feasible)
             self.assertTrue(node.cut_generation_stalled)
             self.assertTrue(node.cut_generation_iterations < max_cut_generation_iterations)
@@ -183,6 +201,7 @@ class TestNode(TestModels):
             node._base_bound(max_cut_generation_iterations=max_cut_generation_iterations)
 
             self.assertTrue(bl.called)
+            self.assertTrue(node.lp_feasible)
             self.assertTrue(node.mip_feasible)
             self.assertFalse(node.cut_generation_stalled)
             self.assertTrue(node.cut_generation_iterations < max_cut_generation_iterations)
@@ -203,6 +222,7 @@ class TestNode(TestModels):
         obj = node.objective_value
         constrs = node.lp.nConstraints
         node._base_bound(gomory_cuts=True)
+        self.assertTrue(node.lp_feasible)
         self.assertFalse(node.cut_generation_stalled)
         self.assertTrue(-2.01 < obj - node.objective_value < -2)
         self.assertTrue(node.lp.nConstraints > constrs)
@@ -251,24 +271,10 @@ class TestNode(TestModels):
         self.assertTrue(node.unbounded)
 
     def test_cut_generation_iteration_fails_asserts(self):
-        node = BaseNode(unbounded.lp, unbounded.integerIndices)
-        self.assertRaisesRegex(AssertionError, 'must have feasible lp',
-                               node._cut_generation_iteration)
-
         node = BaseNode(negative.lp, negative.integerIndices)
         node._bound_lp()
         self.assertRaisesRegex(AssertionError, 'we must have x >= 0',
                                node._cut_generation_iteration)
-
-        node = BaseNode(small_branch.lp, small_branch.integerIndices)
-        node._bound_lp()
-
-        def patch_bound_lp():
-            node.lp_feasible = False
-
-        with patch.object(node, '_bound_lp', new=patch_bound_lp) as bl:
-            self.assertRaisesRegex(AssertionError, 'cuts should not change lp feasibility',
-                                   node._cut_generation_iteration)
 
     def test_cut_generation_iteration(self):
         node = BaseNode(self.small_branch_std.lp, self.small_branch_std.integerIndices)
@@ -405,6 +411,12 @@ class TestNode(TestModels):
         self.assertTrue(np.max(np.abs(cuts[0][0] - np.array([-5, -10]))) < .0001)
         self.assertTrue(isclose(cuts[0][1], -5, abs_tol=.01))
 
+        mock_pth = 'simple_mip_solver.nodes.base_node.BaseNode.basic_variable_indices'
+        with patch(mock_pth, new_callable=PropertyMock) as bvi:
+            bvi.return_value = [0, 1]
+            cuts = node._find_gomory_cuts()
+            self.assertFalse(cuts)
+
     def test_tableau(self):
         node = BaseNode(lp=self.cut3_std.lp, integer_indices=self.cut3_std.integerIndices)
         node._bound_lp()
@@ -412,6 +424,11 @@ class TestNode(TestModels):
                                      [0, -2, 1, 0, -3],
                                      [0, 0, 0, 1, -5]])
         self.assertTrue(np.max(abs(expected_tableau - node.tableau)) < .0001)
+
+        mock_pth = 'simple_mip_solver.nodes.base_node.BaseNode.basic_variable_indices'
+        with patch(mock_pth, new_callable=PropertyMock) as bvi:
+            bvi.return_value = [0, 1]
+            self.assertFalse(node.tableau)
 
     def test_basic_variable_indices(self):
         node = BaseNode(lp=self.cut3_std.lp, integer_indices=self.cut3_std.integerIndices)

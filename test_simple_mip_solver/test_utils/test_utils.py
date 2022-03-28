@@ -1,5 +1,8 @@
 from cylp.cy.CyClpSimplex import CyClpSimplex
+from itertools import product
 import numpy as np
+
+from simple_mip_solver.utils.tolerance import cut_tolerance
 
 
 def check_cut(sol: list, lp: CyClpSimplex, pi: np.ndarray, pi0: float):
@@ -7,10 +10,16 @@ def check_cut(sol: list, lp: CyClpSimplex, pi: np.ndarray, pi0: float):
     relaxation and the cut violates it (third check) so we can debug here and figure out what
     is going on
 
-    To be used in disjunctive_cut.py"""
+    To be used in BaseNode._select_cuts"""
     assert not(all((lp.variablesLower <= sol) * (sol <= lp.variablesUpper)) and
                all(lp.coefMatrix * np.vstack(sol) >= lp.constraintsLower.reshape(-1, 1)) and
-               np.dot(pi, sol) < pi0)
+               np.dot(pi, sol) < pi0 - cut_tolerance)
+
+
+def check_cut_against_grid(lp: CyClpSimplex, pi: np.array, pi0: float, max_val: float):
+    """ Check all possible integer solutions to find a violated point"""
+    for sol in product(*[list(range(max_val)) for _ in pi]):
+        check_cut(sol=sol, lp=lp, pi=pi, pi0=pi0)
 
 
 def check_dual_feasibility(lp):
