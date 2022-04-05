@@ -4,16 +4,10 @@ from scipy.sparse import csc_matrix
 from typing import Tuple, TypeVar, Iterable, Union
 
 from simple_mip_solver import BranchAndBound
-from simple_mip_solver.utils import epsilon
 
 CGLP = TypeVar('CGLP', bound='CutGeneratingLP')
 
 
-# add this as an attribute to each CuttingPlaneNode
-# If not updating constraints or bounds, just copy the CGLP object during branching
-# else create a new CGLP during branching
-# in either case, set current basis as starting_basis attribute to CuttingPlaneNode children
-# maybe make node_kwargs argument that can be passed to branching for init idk
 class CutGeneratingLP:
 
     def __init__(self: CGLP, bb: BranchAndBound, root_id: int, A: np.matrix = None,
@@ -47,6 +41,7 @@ class CutGeneratingLP:
         self.bb = bb
         self.root_id = root_id
         self.lp = self._create_cglp(A, b, var_lb, var_ub)
+        self.cylp_failure = False
 
     # test by making sure we get the coef matrix, bounds, and objective we would expect for the given inputs
     # for passing nothing, coef matrix, and bounds
@@ -179,7 +174,7 @@ class CutGeneratingLP:
             Tuple[Union[CyLPArray, None], Union[float, None]]:
         """ Finds the valid inequality that maximally separates x_star from the convex
         hull of the LP relaxations of each disjunctive term of the branch and bound
-        tree within <self.bb>.
+        tree within <self.bb> (If one exists and CyLP can avoid numerical errors in finding it).
 
         :param x_star: The point we want to cut off. If None, the CGLP will find a valid
         inequality that maximizes the separation of the solution of the LP relaxation
@@ -199,21 +194,21 @@ class CutGeneratingLP:
             assert isinstance(starting_basis, Iterable) and not isinstance(starting_basis, str) \
                 and len(starting_basis) == 2, 'starting basis must be an iterable with two elements'
             for status_array in starting_basis:
-                assert isinstance(status_array, Iterable) and not isinstance(status_array, str), \
-                    'elements of starting basis must be iterables'
+                assert isinstance(status_array, np.ndarray), \
+                    'elements of starting basis must be np.ndarrays'
             assert starting_basis[0].shape == (self.lp.nVariables,), \
                 'first starting_basis element should give status for exactly each decision variable in CGLP'
             assert starting_basis[1].shape == (self.lp.nConstraints,), \
                 'second starting_basis element should give status for exactly each slack variable in CGLP'
             self.lp.setBasisStatus(*starting_basis)
 
-        # solve
-        self.lp.dual(startFinishOptions='x')
-        assert self.lp.getStatusCode() == 0, 'we should get optimal solution'
+        # solve - use primal since objective is main thing changing in cutting plane method
+        self.lp.primal()
 
-        # if we find a cut that separates x_star from the disjunction
-        if self.lp.objectiveValue <= epsilon:
+        if self.lp.getStatusCode() in [0, 2]:
             return CyLPArray(self.lp.primalVariableSolution['pi']), \
                    self.lp.primalVariableSolution['pi0'][0]
         else:
+            # CGLP always has a solution. CyLP has a floating point issue in this case.
+            self.cylp_failure = True
             return None, None

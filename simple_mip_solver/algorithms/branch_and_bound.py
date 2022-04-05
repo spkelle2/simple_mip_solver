@@ -239,11 +239,9 @@ class BranchAndBound(BaseAlgorithm):
         assert isinstance(rtn, dict), 'rtn must be a dictionary'
         cuts = rtn.get('cuts')
         if cuts:
-            assert isinstance(cuts, dict), 'cuts must be dict'
-            for name, cut in cuts.items():
-                assert isinstance(cut, CyLPExpr), 'each cut must be a CyLPExpr'
+            for name, (pi, pi0) in cuts.items():
                 for node in self._node_queue.queue:
-                    node.lp.addConstraint(cut, name=name)
+                    node.cut_pool[name] = (pi, pi0)
             del rtn['cuts']
         self._process_rtn(rtn)
 
@@ -355,7 +353,7 @@ class BranchAndBound(BaseAlgorithm):
         new_lp.setBasisStatus(orig_var_status, orig_slack_status)
 
         # rerun and reassign
-        new_lp.dual(startFinishOptions='x')
+        new_lp.dual()
         return new_lp
 
 

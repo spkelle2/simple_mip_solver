@@ -1,13 +1,14 @@
 from coinor.cuppy.milpInstance import MILPInstance
 from cylp.cy.CyClpSimplex import CyClpSimplex, CyLPArray
 import inspect
+from math import isclose
 import numpy as np
 from numpy.testing import assert_allclose
 import os
 import unittest
 from unittest.mock import patch
 
-from simple_mip_solver import BranchAndBound, CuttingPlane, BaseNode
+from simple_mip_solver import BranchAndBound, BaseNode
 from simple_mip_solver.utils.cut_generating_lp import CutGeneratingLP
 from test_simple_mip_solver.example_models import small_branch, square, generate_random_variety
 
@@ -15,16 +16,15 @@ from test_simple_mip_solver.example_models import small_branch, square, generate
 class TestCutGeneratingLP(unittest.TestCase):
 
     def test_init_fails_asserts(self):
-        cp = CuttingPlane(small_branch, BaseNode)
-        bb = BranchAndBound(small_branch, BaseNode)
+        bb = BranchAndBound(small_branch, BaseNode, gomory_cuts=False)
         bb.solve()
         self.assertRaisesRegex(AssertionError, 'bb must be a BranchAndBound',
-                               CutGeneratingLP, bb=cp, root_id=0)
+                               CutGeneratingLP, bb=5, root_id=0)
         self.assertRaisesRegex(AssertionError, 'root node of the disjunction must be present',
                                CutGeneratingLP, bb=bb, root_id=100)
 
     def test_init(self):
-        bb = BranchAndBound(small_branch, BaseNode)
+        bb = BranchAndBound(small_branch, BaseNode, gomory_cuts=False)
         bb.solve()
         with patch('simple_mip_solver.utils.cut_generating_lp.CutGeneratingLP._create_cglp') as cp:
             cglp = CutGeneratingLP(bb, bb.root_node.idx)
@@ -33,7 +33,7 @@ class TestCutGeneratingLP(unittest.TestCase):
             self.assertTrue(cp.called)
 
     def test_create_cglp_fails_asserts(self):
-        bb = BranchAndBound(small_branch)
+        bb = BranchAndBound(small_branch, gomory_cuts=False)
         bb.solve()
         terminal_nodes = bb.tree.get_leaves(0)
         disjunctive_nodes = [n for n in terminal_nodes if n.lp_feasible is not False]
@@ -44,7 +44,7 @@ class TestCutGeneratingLP(unittest.TestCase):
         self.assertRaisesRegex(AssertionError, 'Each disjunctive term should have the same variables',
                                cglp._create_cglp)
 
-        bb = BranchAndBound(small_branch)
+        bb = BranchAndBound(small_branch, gomory_cuts=False)
         bb.solve()
         cglp = CutGeneratingLP(bb, bb.root_node.idx)
         A = np.append(-small_branch.A.copy(), np.matrix([[-1, -1, -1]]), axis=0)
@@ -71,7 +71,7 @@ class TestCutGeneratingLP(unittest.TestCase):
 
     def test_create_cglp_standard(self):
         inf = small_branch.lp.getCoinInfinity()
-        bb = BranchAndBound(small_branch)
+        bb = BranchAndBound(small_branch, gomory_cuts=False)
         bb.solve()
         cglp = CutGeneratingLP(bb, bb.root_node.idx)
         lp = cglp._create_cglp()
@@ -138,7 +138,7 @@ class TestCutGeneratingLP(unittest.TestCase):
     def test_create_cglp_infinite_bounds(self):
         # check that infinite var bounds are 0
         inf = square.lp.getCoinInfinity()
-        bb = BranchAndBound(square, node_limit=1)
+        bb = BranchAndBound(square, node_limit=1, gomory_cuts=False)
         bb.solve()
         cglp = CutGeneratingLP(bb, bb.root_node.idx)
         lp = cglp._create_cglp()
@@ -214,7 +214,7 @@ class TestCutGeneratingLP(unittest.TestCase):
         # check bounds coefficients update as expected for new lb/ub (new bounds)
         # ensure infeasible subproblems removed for updated bound coefs
         inf = small_branch.lp.getCoinInfinity()
-        bb = BranchAndBound(small_branch)
+        bb = BranchAndBound(small_branch, gomory_cuts=False)
         bb.solve()
         cglp = CutGeneratingLP(bb, bb.root_node.idx)
         A = np.append(-small_branch.A.copy(), np.matrix([[-1, -1, -1]]), axis=0)
@@ -264,7 +264,7 @@ class TestCutGeneratingLP(unittest.TestCase):
         self.assertTrue((lp.constraints[2].varCoefs[v_11].toarray() == 1).all())
 
     def test_solve_fails_asserts(self):
-        bb = BranchAndBound(square)
+        bb = BranchAndBound(square, gomory_cuts=False)
         bb.solve()
         cglp = CutGeneratingLP(bb, bb.root_node.idx)
 
@@ -283,19 +283,22 @@ class TestCutGeneratingLP(unittest.TestCase):
                                cglp.solve, starting_basis=basis2)
 
     def test_solve(self):
-        bb = BranchAndBound(square)
+        bb = BranchAndBound(square, gomory_cuts=False)
         bb.solve()
         cglp = CutGeneratingLP(bb, bb.root_node.idx)
         pi, pi0 = cglp.solve()
 
         # check cut is what we expect, i.e. x1 <= 1 or x2 <= 1
         self.assertTrue(isinstance(pi, CyLPArray))
-        assert_allclose(pi / pi0, np.array([0, 1]), atol=.01)
+        if abs(pi[1]) > abs(pi[0]):
+            assert_allclose(pi / pi0, np.array([0, 1]), atol=.01)
+        else:
+            assert_allclose(pi / pi0, np.array([1, 0]), atol=.01)
         self.assertTrue((pi - .01 < 0).all())
         self.assertTrue(pi0 - .01 < 0)
 
         # try another problem
-        bb = BranchAndBound(small_branch, node_limit=10)
+        bb = BranchAndBound(small_branch, node_limit=10, gomory_cuts=False)
         bb.solve()
         cglp = CutGeneratingLP(bb, bb.root_node.idx)
         pi, pi0 = cglp.solve()
@@ -307,31 +310,32 @@ class TestCutGeneratingLP(unittest.TestCase):
         self.assertTrue(pi0 - .01 < 0)
 
     def test_solve_doesnt_separate(self):
-        bb = BranchAndBound(square)
+        bb = BranchAndBound(square, gomory_cuts=False)
         bb.solve()
         cglp = CutGeneratingLP(bb, bb.root_node.idx)
         pi, pi0 = cglp.solve(x_star=CyLPArray([.5, .5]))
-        self.assertTrue(pi is None)
-        self.assertTrue(pi0 is None)
+        # should still return something - let cut generation algorithm decide what to keeo
+        self.assertTrue(pi is not None)
+        self.assertTrue(pi0 is not None)
 
     def test_solve_different_x_star(self):
-        bb = BranchAndBound(square, node_limit=1)
+        bb = BranchAndBound(square, node_limit=1, gomory_cuts=False)
         bb.solve()
         cglp = CutGeneratingLP(bb, bb.root_node.idx)
         # should shift to cutting off point from above
         pi, pi0 = cglp.solve(x_star=CyLPArray([1.5, 2]))
-        self.assertTrue(pi0 == -.75)
-        self.assertTrue((pi == [0, -.5]).all())
+        self.assertTrue(isclose(pi0, -.75, abs_tol=.01))
+        assert_allclose(pi, np.array([0, -.5]), atol=.01)
         print()
 
     def test_solve_starting_basis(self):
-        bb = BranchAndBound(small_branch, node_limit=10)
+        bb = BranchAndBound(small_branch, node_limit=10, gomory_cuts=False)
         bb.solve()
         cglp = CutGeneratingLP(bb, bb.root_node.idx)
         pi, pi0 = cglp.solve()
         basis = cglp.lp.getBasisStatus()
 
-        bb = BranchAndBound(small_branch, node_limit=10)
+        bb = BranchAndBound(small_branch, node_limit=10, gomory_cuts=False)
         bb.solve()
         cglp = CutGeneratingLP(bb, bb.root_node.idx)
         pi, pi0 = cglp.solve(starting_basis=basis)
@@ -348,7 +352,7 @@ class TestCutGeneratingLP(unittest.TestCase):
             print(f'running test {i + 1}')
             pth = os.path.join(fldr, file)
             model = MILPInstance(file_name=pth)
-            bb = BranchAndBound(model)
+            bb = BranchAndBound(model, gomory_cuts=False)
             bb.solve()
             cglp = CutGeneratingLP(bb=bb, root_id=bb.root_node.idx)
             pi, pi0 = cglp.solve()
