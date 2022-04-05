@@ -360,19 +360,13 @@ class TestBranchAndBound(unittest.TestCase):
         bb = BranchAndBound(small_branch)
         self.assertRaisesRegex(AssertionError, 'rtn must be a dictionary',
                                self.bb._process_bound_rtn, 'fish')
-        rtn = {'cuts': ['hi']}
-        self.assertRaisesRegex(AssertionError, 'cuts must be dict',
-                               self.bb._process_bound_rtn, rtn)
-        rtn = {'cuts': {'cut1': 5}}
-        self.assertRaisesRegex(AssertionError, 'each cut must be a CyLPExpr',
-                               self.bb._process_bound_rtn, rtn)
 
     def test_process_bound_rtn(self):
         cglp_bb = BranchAndBound(small_branch, node_limit=8)
         cglp_bb.solve()
         cglp = CutGeneratingLP(cglp_bb, cglp_bb.root_node.idx)
         pi, pi0 = cglp.solve()
-        rtn = {'cuts': {'node_0_cglp_cut': pi * cglp_bb.root_node.lp.getVarByName('x') >= pi0}}
+        rtn = {'cuts': {'cut_cglp_0_0': (pi, pi0)}}
 
         with patch.object(cglp_bb, '_process_rtn') as pr:
             cglp_bb._process_bound_rtn(rtn)
@@ -380,8 +374,9 @@ class TestBranchAndBound(unittest.TestCase):
             self.assertTrue(len(args) == 1 and len(kwargs) == 0)
             self.assertFalse(args[0])
             for node in cglp_bb._node_queue.queue:
-                self.assertTrue(len(node.lp.constraints) == 2)
-                self.assertTrue(node.lp.constraints[1].name == 'node_0_cglp_cut')
+                self.assertTrue(len(node.cut_pool) == 1)
+                self.assertTrue((node.cut_pool['node_0_cglp_cut'][0] == pi).all())
+                self.assertTrue((node.cut_pool['node_0_cglp_cut'][1] == pi0).all())
 
     def test_find_dual_bound_fails_asserts(self):
         bb = BranchAndBound(small_branch, gomory_cuts=False)

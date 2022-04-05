@@ -1,3 +1,5 @@
+import re
+
 from coinor.cuppy.milpInstance import MILPInstance
 from cylp.py.modeling.CyLPModel import CyLPArray
 # so pulp and pyomo don't believe reading in flat files is a worthwhile feature
@@ -54,6 +56,14 @@ class TestBaseNode(TestModels):
         self.assertFalse(node.cut_generation_iterations)
         self.assertRegexpMatches('cut_gomory_1_1_6', node.cut_name_pattern)
         self.assertFalse(node.cut_generation_stalled)
+        self.assertFalse(node.iterations_gmic_created)
+        self.assertFalse(node.number_gmic_created)
+        self.assertFalse(node.iterations_gmic_added)
+        self.assertFalse(node.number_gmic_added)
+        self.assertFalse(node.iterations_gmic_removed)
+        self.assertFalse(node.number_gmic_removed)
+        self.assertTrue(isinstance(node.gmic_name_pattern, re.Pattern))
+        self.assertFalse(node.cut_pool)
 
     def test_init_lineage(self):
         node = BaseNode(small_branch.lp, small_branch.integerIndices, idx=0)
@@ -105,23 +115,42 @@ class TestBaseNode(TestModels):
                                integer_indices=small_branch.integerIndices,
                                idx=0, ancestors=(0,))
 
+    def test_cut_pool_setter_fails_asserts(self):
+        node = BaseNode(infeasible.lp, infeasible.integerIndices)
+        with self.assertRaisesRegex(AssertionError, 'idx should start with'):
+            node.cut_pool = {'gomory_1_1_1': (CyLPArray([1, 0]), 0)}
+        with self.assertRaisesRegex(AssertionError, 'pi should be CyLPArray'):
+            node.cut_pool = {'cut_gomory_1_1_1': (np.array([1, 0]), 0)}
+        with self.assertRaisesRegex(AssertionError, 'pi0 should be number'):
+            node.cut_pool = {'cut_gomory_1_1_1': (CyLPArray([1, 0]), '0')}
+
     def test_bound(self):
         # check function calls
         node = BaseNode(infeasible.lp, infeasible.integerIndices)
         with patch.object(node, '_base_bound') as bb:
-            node.bound(junk='stuff')  # should work with extra args
+            bb.return_value = {}
+            rtn = node.bound(junk='stuff')  # should work with extra args
             self.assertTrue(bb.call_count == 1, 'should call base bound')
-
-        # check return
-        node = BaseNode(infeasible.lp, infeasible.integerIndices)
-        rtn = node.bound()
-        self.assertTrue(isinstance(rtn, dict), 'should return dict')
-        self.assertFalse(rtn, 'dict should be empty')
+            self.assertFalse(rtn)
 
     def test_base_bound_fails_asserts(self):
         node = BaseNode(infeasible.lp, infeasible.integerIndices)
         self.assertRaisesRegex(AssertionError, 'must be a positive integer',
                                node._base_bound, max_cut_generation_iterations=-1)
+        self.assertRaisesRegex(AssertionError, 'is nonnegative integer',
+                               node._base_bound, total_cut_generation_iterations=-1)
+        self.assertRaisesRegex(AssertionError, 'is nonnegative integer',
+                               node._base_bound, total_iterations_gmic_created=-1)
+        self.assertRaisesRegex(AssertionError, 'is nonnegative integer',
+                               node._base_bound, total_number_gmic_created=-1)
+        self.assertRaisesRegex(AssertionError, 'is nonnegative integer',
+                               node._base_bound, total_iterations_gmic_added=-1)
+        self.assertRaisesRegex(AssertionError, 'is nonnegative integer',
+                               node._base_bound, total_number_gmic_added=-1)
+        self.assertRaisesRegex(AssertionError, 'is nonnegative integer',
+                               node._base_bound, total_iterations_gmic_removed=-1)
+        self.assertRaisesRegex(AssertionError, 'is nonnegative integer',
+                               node._base_bound, total_number_gmic_removed=-1)
 
     def test_base_bound(self):
         node = BaseNode(infeasible.lp, infeasible.integerIndices)
@@ -221,12 +250,22 @@ class TestBaseNode(TestModels):
         node._bound_lp()
         obj = node.objective_value
         constrs = node.lp.nConstraints
-        node._base_bound(gomory_cuts=True)
+        rtn = node._base_bound(gomory_cuts=True, total_iterations_gmic_created=1,
+                               total_number_gmic_created=1, total_iterations_gmic_added=1,
+                               total_number_gmic_added=1, total_iterations_gmic_removed=1,
+                               total_number_gmic_removed=1, total_cut_generation_iterations=10)
         self.assertTrue(node.lp_feasible)
         self.assertFalse(node.cut_generation_stalled)
         self.assertTrue(-2.01 < obj - node.objective_value < -2)
         self.assertTrue(node.lp.nConstraints > constrs)
         self.assertTrue(node.mip_feasible)
+        self.assertTrue(rtn['total_iterations_gmic_created'] == 3)
+        self.assertTrue(rtn['total_number_gmic_created'] == 5)
+        self.assertTrue(rtn['total_iterations_gmic_added'] == 3)
+        self.assertTrue(rtn['total_number_gmic_added'] == 5)
+        self.assertTrue(rtn['total_iterations_gmic_removed'] == 1)
+        self.assertTrue(rtn['total_number_gmic_removed'] == 1)
+        self.assertTrue(rtn['total_cut_generation_iterations'] == 12)
 
     def test_bound_lp_fails_asserts(self):
         node = self.make_multivariable_node()
@@ -298,9 +337,6 @@ class TestBaseNode(TestModels):
             self.assertTrue(rsc.called)
             self.assertTrue(gc.called)
             self.assertTrue(sc.called)
-            kwargs = sc.call_args.kwargs
-            self.assertTrue(all(kwargs['cut_pool']['cut_gomory_0_1_0'][0] == CyLPArray([0, -1, 0])))
-            self.assertTrue(kwargs['cut_pool']['cut_gomory_0_1_0'][1] == -2)
             self.assertTrue(obj == node.objective_value + .00001)  # bound_lp called if true
             self.assertTrue(node.cut_generation_stalled)
 
@@ -321,10 +357,34 @@ class TestBaseNode(TestModels):
         node.lp.addConstraint(CyLPArray([0, -1, 0]) * node.lp.getVarByName('x') >= -1,
                               'cut_gomory_0_2_0')
         node._bound_lp()
-        node._remove_slack_cuts()
-        self.assertRaisesRegex(Exception, 'Constraint "cut_gomory_0_1_0" does not exist',
-                               node.lp.removeConstraint, 'cut_gomory_0_1_0')
-        node.lp.removeConstraint('cut_gomory_0_2_0')  # checks second constraint still there
+        with patch.object(node, '_update_gmic_counts') as ugc:
+            node._remove_slack_cuts()
+            self.assertRaisesRegex(Exception, 'Constraint "cut_gomory_0_1_0" does not exist',
+                                   node.lp.removeConstraint, 'cut_gomory_0_1_0')
+            node.lp.removeConstraint('cut_gomory_0_2_0')  # checks second constraint still there
+            self.assertTrue(ugc.called)
+            self.assertTrue(ugc.call_args.kwargs['operation'] == 'removed')
+            self.assertTrue(ugc.call_args.kwargs['cut_idxs'] == ['cut_gomory_0_1_0'])
+
+    def test_udpate_gmic_counts_fails_asserts(self):
+        node = BaseNode(self.small_branch_std.lp, self.small_branch_std.integerIndices)
+        self.assertRaisesRegex(AssertionError, 'not a single string itself',
+                               node._update_gmic_counts, cut_idxs='cut_gmic_1',
+                               operation='added')
+        self.assertRaisesRegex(AssertionError, 'should be str',
+                               node._update_gmic_counts, cut_idxs=[5],
+                               operation='added')
+        self.assertRaisesRegex(AssertionError, 'operation must be "added"',
+                               node._update_gmic_counts, cut_idxs=['cut_gmic_1'],
+                               operation='add')
+
+    def test_udpate_gmic_counts(self):
+        node = BaseNode(self.small_branch_std.lp, self.small_branch_std.integerIndices)
+        cut_idxs = ['cut_gomory_1_1_1', 'cut_gomory_1_1_2', 'cut_cglp_1_1']
+        for operation in ['added', 'created', 'removed']:
+            node._update_gmic_counts(cut_idxs=cut_idxs, operation=operation)
+            self.assertTrue(getattr(node, f'iterations_gmic_{operation}') == 1)
+            self.assertTrue(getattr(node, f'number_gmic_{operation}') == 2)
 
     def test_generate_cuts_fails_asserts(self):
         node = BaseNode(self.small_branch_std.lp, self.small_branch_std.integerIndices)
@@ -337,7 +397,8 @@ class TestBaseNode(TestModels):
         node._bound_lp()
 
         with patch.object(node, '_find_gomory_cuts') as fgc, \
-                patch('simple_mip_solver.nodes.base_node.numerically_safe_cut') as nsc:
+                patch('simple_mip_solver.nodes.base_node.numerically_safe_cut') as nsc, \
+                patch.object(node, '_update_gmic_counts') as ugc:
             fgc.return_value = {0: (CyLPArray([0, -1, 0]), -2)}
             nsc.return_value = (CyLPArray([0, -1, 0]), -2)
 
@@ -348,18 +409,15 @@ class TestBaseNode(TestModels):
             self.assertTrue(nsc.call_args.kwargs['estimate'] == 'over')
             self.assertTrue(all(cut_pool['cut_gomory_0_0_0'][0] == CyLPArray([0, -1, 0])))
             self.assertTrue(cut_pool['cut_gomory_0_0_0'][1] == -2)
+            self.assertTrue(ugc.called)
+            self.assertTrue(ugc.call_args.kwargs['operation'] == 'created')
+            self.assertTrue(ugc.call_args.kwargs['cut_idxs'] == cut_pool)
 
         self.assertFalse(node._generate_cuts(gomory_cuts=False))
 
     def test_select_cuts_fails_asserts(self):
         node = BaseNode(self.small_branch_std.lp, self.small_branch_std.integerIndices)
         node._bound_lp()
-        self.assertRaisesRegex(AssertionError, 'pi must be CyLPArray',
-                               node._select_cuts,
-                               cut_pool={'cut_gomory_0_1_0': ([0, -1, 0], -2)})
-        self.assertRaisesRegex(AssertionError, 'pi0 must be number',
-                               node._select_cuts,
-                               cut_pool={'cut_gomory_0_1_0': (CyLPArray([0, -1, 0]), '-2')})
         self.assertRaisesRegex(AssertionError, 'max_nonzero_coefs must be positive int',
                                node._select_cuts, max_nonzero_coefs=0)
         self.assertRaisesRegex(AssertionError, 'parallel_cut_tolerance must be number in \(0, 90\]',
@@ -367,41 +425,51 @@ class TestBaseNode(TestModels):
 
     def test_select_cuts(self):
         cuts = {
-            'cut1': (CyLPArray([-1, -1, -1]), -2),  # option to pick off for too many nonzero
-            'cut2': (CyLPArray([-1, 0, -1]), -1),  # keep
-            'cut3': (CyLPArray([0, -1, 0]), -1),  # keep
-            'cut4': (CyLPArray([0, 0, 0]), 0),  # pick off for all zero
-            'cut5': (CyLPArray([-99, 0, -101]), -110),  # option to pick off for too parallel
-            'cut6': (CyLPArray([-1, 0, 0]), -2)  # pick off for not enough depth
+            'cut_1': (CyLPArray([-1, -1, -1]), -2),  # option to pick off for too many nonzero
+            'cut_2': (CyLPArray([-1, 0, -1]), -1),  # keep
+            'cut_3': (CyLPArray([0, -1, 0]), -1),  # keep
+            'cut_4': (CyLPArray([0, 0, 0]), 0),  # pick off for all zero
+            'cut_5': (CyLPArray([-99, 0, -101]), -110),  # option to pick off for too parallel
+            'cut_6': (CyLPArray([-1, 0, 0]), -2)  # pick off for not enough depth
         }
-        correct_cuts = {'cut1', 'cut2', 'cut3'}
+        correct_cuts = {'cut_1', 'cut_2', 'cut_3'}
         node = BaseNode(self.small_branch_std.lp, self.small_branch_std.integerIndices)
         node._bound_lp()
 
-        added_cuts = node._select_cuts(cut_pool=cuts)
-        self.assertTrue(set(added_cuts.keys()) == correct_cuts)
-        for idx in correct_cuts:
-            # check each cut was added - will fail if not
-            node.lp.removeConstraint(idx)
+        node.cut_pool = cuts
+        with patch.object(node, '_update_gmic_counts') as ugc:
+            added_cuts = node._select_cuts()
+            self.assertTrue(set(added_cuts.keys()) == correct_cuts)
+            for idx in correct_cuts:
+                # check each cut was added - will fail if not
+                node.lp.removeConstraint(idx)
+            self.assertTrue(set(node.cut_pool.keys()) == {'cut_4', 'cut_5', 'cut_6'})
+            self.assertTrue(ugc.called)
+            self.assertTrue(ugc.call_args.kwargs['operation'] == 'added')
+            self.assertTrue(ugc.call_args.kwargs['cut_idxs'] == added_cuts)
 
     def test_select_cuts_different_tolerances(self):
         cuts = {
-            'cut1': (CyLPArray([-1, -1, -1]), -2),  # option to pick off for too many nonzero
-            'cut2': (CyLPArray([-1, 0, -1]), -1),  # keep
-            'cut3': (CyLPArray([0, -1, 0]), -1),  # keep
-            'cut4': (CyLPArray([0, 0, 0]), 0),  # pick off for all zero
-            'cut5': (CyLPArray([-99, 0, -101]), -110),  # option to pick off for too parallel
-            'cut6': (CyLPArray([-1, 0, 0]), -2)  # pick off for not enough depth
+            'cut_1': (CyLPArray([-1, -1, -1]), -2),  # option to pick off for too many nonzero
+            'cut_2': (CyLPArray([-1, 0, -1]), -1),  # keep
+            'cut_3': (CyLPArray([0, -1, 0]), -1),  # keep
+            'cut_4': (CyLPArray([0, 0, 0]), 0),  # pick off for all zero
+            'cut_5': (CyLPArray([-99, 0, -101]), -110),  # option to pick off for too parallel
+            'cut_6': (CyLPArray([-1, 0, 0]), -2)  # pick off for not enough depth
         }
-        correct_cuts = {'cut2', 'cut3', 'cut5'}
+        correct_cuts = {'cut_2', 'cut_3', 'cut_5'}
         node = BaseNode(self.small_branch_std.lp, self.small_branch_std.integerIndices)
         node._bound_lp()
-
-        added_cuts = node._select_cuts(cut_pool=cuts, max_nonzero_coefs=2,
-                                       parallel_cut_tolerance=.0001)
-        self.assertTrue(set(added_cuts.keys()) == correct_cuts)
-        for idx in correct_cuts:
-            node.lp.removeConstraint(idx)  # will fail if the constraint not present
+        node.cut_pool = cuts
+        with patch.object(node, '_update_gmic_counts') as ugc:
+            added_cuts = node._select_cuts(max_nonzero_coefs=2, parallel_cut_tolerance=.0001)
+            self.assertTrue(set(added_cuts.keys()) == correct_cuts)
+            self.assertTrue(set(node.cut_pool.keys()) == {'cut_1', 'cut_4', 'cut_6'})
+            for idx in correct_cuts:
+                node.lp.removeConstraint(idx)  # will fail if the constraint not present
+            self.assertTrue(ugc.called)
+            self.assertTrue(ugc.call_args.kwargs['operation'] == 'added')
+            self.assertTrue(ugc.call_args.kwargs['cut_idxs'] == added_cuts)
 
     def test_find_gomory_cuts(self):
         node = BaseNode(lp=self.cut3_std.lp, integer_indices=self.cut3_std.integerIndices)

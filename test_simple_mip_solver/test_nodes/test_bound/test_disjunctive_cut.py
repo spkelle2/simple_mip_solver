@@ -53,11 +53,26 @@ class TestNode(TestModels):
                                     cglp=cglp)
         self.assertTrue(cglp is n.cglp)
         self.assertTrue(n.prev_cglp_basis is None)
-        self.assertFalse(n.cglp_cut_added)
+        self.assertFalse(n.current_node_added_cglp)
         self.assertTrue(n.previous_cglp_added)
         self.assertTrue(n.cglp_name_pattern)
         self.assertFalse(n.sharable_cuts)
-        self.assertFalse(n.cglp_calls)
+        self.assertFalse(n.number_cglp_created)
+        self.assertFalse(n.number_cglp_added)
+        self.assertFalse(n.number_cglp_removed)
+
+    def test_bound_fails_asserts(self):
+        bb = BranchAndBound(self.cut1_std)
+        bb.solve()
+        cglp = CutGeneratingLP(bb, bb.root_node.idx)
+        node = DisjunctiveCutBoundNode(lp=bb.root_node.lp, integer_indices=self.cut1_std.integerIndices,
+                                       cglp=cglp)
+        self.assertRaisesRegex(AssertionError, 'is nonnegative integer',
+                               node.bound, total_number_cglp_created=-1)
+        self.assertRaisesRegex(AssertionError, 'is nonnegative integer',
+                               node.bound, total_number_cglp_added=-1)
+        self.assertRaisesRegex(AssertionError, 'is nonnegative integer',
+                               node.bound, total_number_cglp_removed=-1)
 
     def test_bound(self):
         bb = BranchAndBound(self.cut1_std)
@@ -75,13 +90,37 @@ class TestNode(TestModels):
             b.return_value = {}
             rtn = node.bound()
             self.assertTrue(b.called)
-            self.assertFalse(rtn)
+            self.assertFalse(rtn['total_number_cglp_created'])
+            self.assertFalse(rtn['total_number_cglp_added'])
+            self.assertFalse(rtn['total_number_cglp_removed'])
 
             # some cut sharable
+            # check to make sure previous values added to
+            for key in rtn:
+                rtn[key] += 1
             node.sharable_cuts = {'cut_cglp_1_1': 'some cut'}
-            rtn = node.bound()
+            rtn = node.bound(**rtn)
             self.assertTrue(b.called)
             self.assertTrue(rtn['cuts'] == node.sharable_cuts)
+            self.assertTrue(rtn['total_number_cglp_created'])
+            self.assertTrue(rtn['total_number_cglp_added'])
+            self.assertTrue(rtn['total_number_cglp_removed'])
+
+    def test_remove_slack_cuts(self):
+        bb = BranchAndBound(self.cut1_std)
+        bb.solve()
+        cglp = CutGeneratingLP(bb, bb.root_node.idx)
+
+        # check function calls and returns
+        node = DisjunctiveCutBoundNode(lp=self.cut1_std.lp,
+                                       integer_indices=self.cut1_std.integerIndices,
+                                       cglp=cglp)
+        with patch('simple_mip_solver.nodes.base_node.BaseNode._remove_slack_cuts') as rsc:
+            rsc.return_value = ['cut_gomory_0_2_0', 'cut_cglp_0_0']
+            idxs = node._remove_slack_cuts()
+            self.assertTrue(idxs == ['cut_gomory_0_2_0', 'cut_cglp_0_0'])
+            self.assertTrue(rsc.called)
+            self.assertTrue(node.number_cglp_removed == 1)
 
     def test_generate_cuts_fails_asserts(self):
         bb = BranchAndBound(self.cut1_std)
@@ -117,6 +156,7 @@ class TestNode(TestModels):
             self.assertTrue(gcsb.call_count == 1)
             self.assertTrue(nsc.call_count == 1)
             self.assertTrue({cut for cut in cut_pool} == {'cut_cglp_0_0'})
+            self.assertTrue(node.number_cglp_created == 1)
 
         with patch('simple_mip_solver.nodes.base_node.BaseNode._generate_cuts') as gc, \
                 patch.object(node.cglp, 'solve') as s, \
@@ -127,11 +167,12 @@ class TestNode(TestModels):
             # previous cglp not added but max_cglp_calls more
             node.previous_cglp_added = False
             cut_pool = node._generate_cuts()
-            self.assertTrue(gc.call_count == 1)
+            self.assertTrue(gc.call_count == 1)  # new patch object thats why
             self.assertFalse(s.called)
             self.assertFalse(gcsb.called)
             self.assertFalse(nsc.called)
             self.assertFalse(cut_pool)
+            self.assertTrue(node.number_cglp_created == 1)
 
             # previous cglp added but max_cglp_calls less
             node.cut_generation_iterations += 1
@@ -141,6 +182,7 @@ class TestNode(TestModels):
             self.assertFalse(gcsb.called)
             self.assertFalse(nsc.called)
             self.assertFalse(cut_pool)
+            self.assertTrue(node.number_cglp_created == 1)
 
     def test_generate_cuts_gets_warm_start_right(self):
         bb = BranchAndBound(self.cut1_std, gomory_cuts=False)
@@ -221,9 +263,10 @@ class TestNode(TestModels):
             added_cuts = node._select_cuts(cglp_cumulative_constraints=False,
                                            cglp_cumulative_bounds=False)
             self.assertTrue(sc.call_count == 1)
-            self.assertFalse(node.cglp_cut_added)
+            self.assertFalse(node.current_node_added_cglp)
             self.assertFalse(node.previous_cglp_added)
             self.assertFalse(node.sharable_cuts)
+            self.assertFalse(node.number_cglp_added)
             self.assertTrue({c for c in added_cuts} == {'cut_gomory_0_0_0'})
 
             # yes cglp cut
@@ -234,8 +277,9 @@ class TestNode(TestModels):
             added_cuts = node._select_cuts(cglp_cumulative_constraints=True,
                                            cglp_cumulative_bounds=True)
             self.assertTrue(sc.call_count == 2)
-            self.assertTrue(node.cglp_cut_added)
+            self.assertTrue(node.current_node_added_cglp)
             self.assertTrue(node.previous_cglp_added)
+            self.assertTrue(node.number_cglp_added == 1)
             self.assertFalse(node.sharable_cuts)
             self.assertTrue({c for c in added_cuts} == {'cut_cglp_0_0', 'cut_gomory_0_0_0'})
 
@@ -243,16 +287,18 @@ class TestNode(TestModels):
             added_cuts = node._select_cuts(cglp_cumulative_constraints=False,
                                            cglp_cumulative_bounds=True)
             self.assertTrue(sc.call_count == 3)
-            self.assertTrue(node.cglp_cut_added)
+            self.assertTrue(node.current_node_added_cglp)
             self.assertTrue(node.previous_cglp_added)
+            self.assertTrue(node.number_cglp_added == 2)
             self.assertFalse(node.sharable_cuts)
             self.assertTrue({c for c in added_cuts} == {'cut_cglp_0_0', 'cut_gomory_0_0_0'})
 
             added_cuts = node._select_cuts(cglp_cumulative_constraints=True,
                                            cglp_cumulative_bounds=False)
             self.assertTrue(sc.call_count == 4)
-            self.assertTrue(node.cglp_cut_added)
+            self.assertTrue(node.current_node_added_cglp)
             self.assertTrue(node.previous_cglp_added)
+            self.assertTrue(node.number_cglp_added == 3)
             self.assertFalse(node.sharable_cuts)
             self.assertTrue({c for c in added_cuts} == {'cut_cglp_0_0', 'cut_gomory_0_0_0'})
 
@@ -260,8 +306,9 @@ class TestNode(TestModels):
             added_cuts = node._select_cuts(cglp_cumulative_constraints=False,
                                            cglp_cumulative_bounds=False)
             self.assertTrue(sc.call_count == 5)
-            self.assertTrue(node.cglp_cut_added)
+            self.assertTrue(node.current_node_added_cglp)
             self.assertTrue(node.previous_cglp_added)
+            self.assertTrue(node.number_cglp_added == 4)
             self.assertTrue(node.sharable_cuts)
             self.assertTrue({c for c in added_cuts} == {'cut_cglp_0_0', 'cut_gomory_0_0_0'})
 
@@ -305,7 +352,7 @@ class TestNode(TestModels):
         n = DisjunctiveCutBoundNode(lp=self.cut1_std.lp, integer_indices=self.cut1_std.integerIndices,
                                     cglp=cglp)
         n._bound_lp()
-        n.cglp_cut_added = True
+        n.current_node_added_cglp = True
         with patch('simple_mip_solver.nodes.bound.disjunctive_cut.CutGeneratingLP',
                    spec=CutGeneratingLP) as cm, patch.object(BaseNode, 'branch') as bm:
             bm.return_value = 'rtn'
@@ -333,7 +380,7 @@ class TestNode(TestModels):
         n = DisjunctiveCutBoundNode(lp=self.cut1_std.lp, integer_indices=self.cut1_std.integerIndices,
                                     cglp=cglp)
         n._bound_lp()
-        n.cglp_cut_added = True
+        n.current_node_added_cglp = True
         with patch.object(BaseNode, 'branch') as bm:
             bm.return_value = 'rtn'
             n.branch()

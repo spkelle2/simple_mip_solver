@@ -12,7 +12,7 @@ import numpy as np
 import os
 import unittest
 
-from simple_mip_solver import DisjunctiveCutBoundNode, BranchAndBound
+from simple_mip_solver import DisjunctiveCutBoundNode, BranchAndBound, PseudoCostBranchNode
 from simple_mip_solver.utils.cut_generating_lp import CutGeneratingLP
 from test_simple_mip_solver.example_models import generate_random_variety
 
@@ -48,6 +48,29 @@ class TestModels(unittest.TestCase):
                 print(f'gurobi: {gu_mdl.objVal}')
             self.assertTrue(isclose(bb.objective_value, gu_mdl.objVal, abs_tol=.01),
                             f'different for {file}')
+            self.check_pseudo_costs(bb)
+            self.check_gmics(bb)
+
+    def check_pseudo_costs(self, bb):
+        if bb.evaluated_nodes >= 4 and isinstance(bb.root_node, PseudoCostBranchNode):
+            p = bb._kwargs['pseudo_costs']
+            # again just some rough numbers here to make sure nothing is super weird
+            self.assertTrue(len(p.keys()) <= bb.root_node.lp.nVariables)
+            self.assertTrue(sum(sum(b['times'] for b in idx_dict.values()) for idx_dict in p.values())
+                            <= 2*(bb.evaluated_nodes + bb.root_node.lp.nVariables))
+
+    def check_gmics(self, bb):
+        if bb.evaluated_nodes >= 2 and bb._kwargs.get('gomory_cuts', True):
+            # these are just rough values - if broken just check to make sure ok
+            self.assertTrue(bb._kwargs['total_iterations_gmic_created'] /
+                            bb._kwargs['total_cut_generation_iterations'] >= .25)
+            self.assertTrue(bb._kwargs['total_number_gmic_created'] /
+                            bb._kwargs['total_cut_generation_iterations'] >= .5)
+            # you can end up with more being removed because of branching
+            self.assertTrue(bb._kwargs['total_number_gmic_added'] <=
+                            bb._kwargs['total_number_gmic_created'])
+            self.assertTrue(bb._kwargs['total_iterations_gmic_added'] <=
+                            bb._kwargs['total_iterations_gmic_created'])
 
     def disjunctive_cut_test_models(self):
         ratio_run = .05
@@ -92,8 +115,16 @@ class TestModels(unittest.TestCase):
                     print(f'gurobi: {gu_mdl.objVal}')
                     dif[i, j] = {'mine': bb.objective_value, 'gurobi': gu_mdl.objVal}
                     count_different += 1
-                # self.assertTrue(isclose(bb.objective_value, gu_mdl.objVal, abs_tol=.01),
-                #                 f'different for {file}')
+
+                # check cuts and pseudo costs
+                self.check_pseudo_costs(bb)
+                self.check_gmics(bb)
         self.assertTrue(count_different / (num_kwargs * num_fldrs) < .02 * ratio_run,
                         'try to get less than 2% failure or less')
         print()
+
+    def check_disjunctive_cuts(self, bb):
+        if bb.evaluated_nodes >= 2:
+            # these are just rough values - if broken just check to make sure ok
+            self.assertTrue(bb._kwargs['total_number_cglp_created'] /
+                            bb.evaluated_nodes >= .1)

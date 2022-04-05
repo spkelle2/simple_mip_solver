@@ -37,10 +37,11 @@ class PseudoCostBranchNode(BaseNode):
         assert not problems, f'pseudo cost dict has following errors: {problems}'
         self.pseudo_costs = pseudo_costs
         self.strong_branch_iters = strong_branch_iters
-        self._base_bound(**kwargs)
+        rtn = self._base_bound(**kwargs)
         if self.lp_feasible:
             self._update_pseudo_costs()
-        return {'pseudo_costs': self.pseudo_costs}
+        rtn['pseudo_costs'] = self.pseudo_costs
+        return rtn
 
     def _update_pseudo_costs(self: T) -> None:
         """ Update the pseudo costs for the variable branched on in the current

@@ -1,6 +1,6 @@
 from __future__ import annotations
 from cylp.py.modeling.CyLPModel import CyLPArray
-from typing import Dict, Any, TypeVar, Tuple, Union
+from typing import Dict, Any, TypeVar, Tuple, Union, List
 import numpy as np
 import re
 
@@ -29,7 +29,7 @@ class DisjunctiveCutBoundNode(BaseNode):
         be used for generating its children.
     """
 
-    def __init__(self, cglp: CutGeneratingLP = None,
+    def __init__(self: G, cglp: CutGeneratingLP = None,
                  prev_cglp_basis: Tuple[np.ndarray, np.ndarray] = None,
                  *args, **kwargs):
         """
@@ -48,24 +48,55 @@ class DisjunctiveCutBoundNode(BaseNode):
 
         self.cglp = cglp
         self.prev_cglp_basis = prev_cglp_basis
-        self.cglp_cut_added = False
+        self.current_node_added_cglp = False
+        # flag tracking if current node or previous cut generation iteration added cglp
         self.previous_cglp_added = self.cglp is not None
         self.cglp_name_pattern = re.compile('^cut_cglp_')
         self.sharable_cuts = {}
-        self.cglp_calls = 0
+        self.number_cglp_created = 0
+        self.number_cglp_added = 0
+        self.number_cglp_removed = 0
 
-    def bound(self: G, **kwargs: Any) -> Dict[str, Any]:
+    def bound(self: G, total_number_cglp_created: int = 0, total_number_cglp_added: int = 0,
+              total_number_cglp_removed: int = 0, **kwargs: Any) -> Dict[str, Any]:
         """ Extends super's bound by returning disjunctive cuts valid for all
         other nodes
 
+        :param total_number_cglp_created: Running total of disjunctive cuts created across
+        all branch and bound subproblems
+        :param total_number_cglp_added: Running total of disjunctive cuts added to the
+        underlying LP relaxation across all branch and bound subproblems
+        :param total_number_cglp_removed: Running total of disjunctive cuts removed from the
+        underlying LP relaxation across all branch and bound subproblems
         :param kwargs: dictionary of arguments to pass on to selected subroutines
         :return: dictionary returned from super's bound()
         calls
         """
+        assert isinstance(total_number_cglp_added, int) and total_number_cglp_added >= 0, \
+            "total_number_cglp_added is nonnegative integer"
+        assert isinstance(total_number_cglp_created, int) and total_number_cglp_created >= 0, \
+            "total_number_gmic_created is nonnegative integer"
+        assert isinstance(total_number_cglp_removed, int) and total_number_cglp_removed >= 0, \
+            "total_number_cglp_removed is nonnegative integer"
+
         rtn = super().bound(**kwargs)
+        rtn['total_number_cglp_created'] = total_number_cglp_created + self.number_cglp_created
+        rtn['total_number_cglp_added'] = total_number_cglp_added + self.number_cglp_added
+        rtn['total_number_cglp_removed'] = total_number_cglp_removed + self.number_cglp_removed
         if self.sharable_cuts:
             rtn['cuts'] = self.sharable_cuts
         return rtn
+
+    def _remove_slack_cuts(self: G, **kwargs) -> List[str]:
+        """ calls super()'s method then counts removal of disjunctive cuts
+
+        :param kwargs: dictionary of arguments to pass on to selected subroutines
+        :return: list of indices corresponding to removed constraints
+        """
+        removable_idxs = super()._remove_slack_cuts(**kwargs)
+        self.number_cglp_removed += sum(bool(self.cglp_name_pattern.match(idx))
+                                        for idx in removable_idxs)
+        return removable_idxs
 
     def _generate_cuts(self: G, max_cglp_calls: int = None, **kwargs) -> \
             Dict[str: Union[CyLPArray, float]]:
@@ -94,7 +125,7 @@ class DisjunctiveCutBoundNode(BaseNode):
             idx = f'cut_cglp_{self.idx}_{self.cut_generation_iterations}'
             pi, pi0 = (numerically_safe_cut(pi=pi, pi0=pi0, estimate='over'))
             cut_pool[idx] = (pi, pi0)
-            self.cglp_calls += 1
+            self.number_cglp_created += 1
 
         return cut_pool
 
@@ -144,11 +175,14 @@ class DisjunctiveCutBoundNode(BaseNode):
         added_cuts = super()._select_cuts(**kwargs)
         for idx, (pi, pi0) in added_cuts.items():
             if self.cglp_name_pattern.match(idx):
-                self.cglp_cut_added = True
+                # these could be true from adding CGLP from other node, but I think
+                # continuing to make CGLP's in that case is the most reasonable
+                self.current_node_added_cglp = True
                 self.previous_cglp_added = True
+                self.number_cglp_added += 1
                 # if using original bounds and constraints, cut valid for other subproblems
                 if not cglp_cumulative_bounds and not cglp_cumulative_constraints:
-                    self.sharable_cuts[idx] = pi * self.lp.getVarByName('x') >= pi0
+                    self.sharable_cuts[idx] = (pi, pi0)
 
         return added_cuts
 
@@ -174,7 +208,7 @@ class DisjunctiveCutBoundNode(BaseNode):
         assert isinstance(cglp_cumulative_bounds, bool), 'cglp_cumulative_bounds is bool'
 
         # don't pass on cglp if this node didn't use the cut
-        if self.cglp is None or not self.cglp_cut_added:
+        if self.cglp is None or not self.current_node_added_cglp:
             return super().branch(**kwargs)
 
         elif cglp_cumulative_constraints or cglp_cumulative_bounds:
