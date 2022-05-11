@@ -73,7 +73,7 @@ class TestModels(unittest.TestCase):
                             bb._kwargs['total_iterations_gmic_created'])
 
     def disjunctive_cut_test_models(self):
-        ratio_run = .05
+        ratio_run = 1
         count_different = 0
         dif = {}
         self.assertTrue(gu, 'gurobipy needed for this test')
@@ -92,6 +92,9 @@ class TestModels(unittest.TestCase):
         for j, kwargs in enumerate(kwargs_list):
             for i, file in enumerate(os.listdir(fldr)):
                 if np.random.uniform() > ratio_run:
+                    continue
+                if (i, j) not in [(3, 0), (3, 1), (3, 2), (3, 3), (3, 8), (3, 9),
+                                  (3, 10), (3, 11), (3, 19), (3, 27)]:
                     continue
                 print(f'running test {(i + 1) + j * num_fldrs} of {num_kwargs * num_fldrs}')
                 pth = os.path.join(fldr, file)
@@ -113,15 +116,16 @@ class TestModels(unittest.TestCase):
                     print(f'different for {file}')
                     print(f'mine: {bb.objective_value}')
                     print(f'gurobi: {gu_mdl.objVal}')
-                    dif[i, j] = {'mine': bb.objective_value, 'gurobi': gu_mdl.objVal}
+                    dif[i, j] = {'mine': bb.objective_value, 'gurobi': gu_mdl.objVal,
+                                 'file': file, **kwargs}
                     count_different += 1
 
                 # check cuts and pseudo costs
                 self.check_pseudo_costs(bb)
                 self.check_gmics(bb)
-        self.assertTrue(count_different / (num_kwargs * num_fldrs) < .02 * ratio_run,
-                        'try to get less than 2% failure or less')
-        print()
+        print(dif)
+        print(f"count_different: {count_different}")
+        self.assertFalse(count_different, 'Check the above runs. They should be same.')
 
     def check_disjunctive_cuts(self, bb):
         if bb.evaluated_nodes >= 2:

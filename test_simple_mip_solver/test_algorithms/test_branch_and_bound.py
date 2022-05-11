@@ -15,7 +15,8 @@ from simple_mip_solver.algorithms.branch_and_bound import BranchAndBoundTree
 from simple_mip_solver.algorithms.base_algorithm import BaseAlgorithm
 from simple_mip_solver.utils.cut_generating_lp import CutGeneratingLP
 from test_simple_mip_solver.example_models import no_branch, small_branch, infeasible, \
-    unbounded, infeasible2, h3p1, h3p1_0, h3p1_1, h3p1_2, h3p1_3, h3p1_4, h3p1_5
+    unbounded, infeasible2, h3p1, h3p1_0, h3p1_1, h3p1_2, h3p1_3, h3p1_4, h3p1_5, \
+    small_branch_copy
 from test_simple_mip_solver import example_models
 
 
@@ -24,14 +25,24 @@ skip_longs = True
 
 class TestBranchAndBoundTree(unittest.TestCase):
 
+    def setUp(self) -> None:
+        # reset models each test so lps dont keep added constraints
+        for name, m in {'small_branch_std': small_branch, 'infeasible_std': infeasible,
+                        'no_branch_std': no_branch}.items():
+            lp = m.lp
+            new_m = MILPInstance(A=m.A, b=m.b, c=lp.objective, l=m.l, sense=['Min', m.sense],
+                                 integerIndices=m.integerIndices, numVars=len(lp.objective))
+            new_m = BaseAlgorithm._convert_constraints_to_greq(new_m)
+            setattr(self, name, new_m)
+
     def test_get_leaves_fails_asserts(self):
-        bb = BranchAndBound(small_branch)
+        bb = BranchAndBound(self.small_branch_std, gomory_cuts=False)
         bb.solve()
         self.assertRaisesRegex(AssertionError, "subtree_root_id must belong to the tree",
                                bb.tree.get_leaves, 20)
 
     def test_get_leaves(self):
-        bb = BranchAndBound(small_branch)
+        bb = BranchAndBound(self.small_branch_std, gomory_cuts=False)
         bb.solve()
         leaves = bb.tree.get_leaves(0)
         for node_id, node in bb.tree.nodes.items():
@@ -40,8 +51,23 @@ class TestBranchAndBoundTree(unittest.TestCase):
             else:
                 self.assertTrue(len(bb.tree.get_children(node_id)) == 2)
 
+    def test_get_disjunction_fails_asserts(self):
+        bb = BranchAndBound(self.small_branch_std, gomory_cuts=False)
+        bb.solve()
+        self.assertRaisesRegex(AssertionError, "subtree_root_id must belong to the tree",
+                               bb.tree.get_disjunction, 20)
+
+    def test_get_disjunction(self):
+        bb = BranchAndBound(self.small_branch_std, gomory_cuts=False)
+        bb.solve()
+        disjunction = bb.tree.get_disjunction(0)
+        self.assertTrue(all(disjunction[0][0] == [0, 0, 0]))
+        self.assertTrue(all(disjunction[0][1] == [0, 1, 1]))
+        self.assertTrue(all(disjunction[1][0] == [1, 0, 0]))
+        self.assertTrue(all(disjunction[1][1] == [1, 1, 0]))
+
     def test_get_node_instances_fails_asserts(self):
-        bb = BranchAndBound(small_branch)
+        bb = BranchAndBound(self.small_branch_std, gomory_cuts=False)
         bb.solve()
         self.assertRaisesRegex(AssertionError, 'must be an integer or iterable',
                                bb.tree.get_node_instances, '1')
@@ -52,7 +78,7 @@ class TestBranchAndBoundTree(unittest.TestCase):
                                bb.tree.get_node_instances, [0])
 
     def test_get_node_instances(self):
-        bb = BranchAndBound(small_branch, gomory_cuts=False)
+        bb = BranchAndBound(small_branch_copy, gomory_cuts=False)
         bb.solve()
 
         # test list
@@ -71,14 +97,28 @@ class TestBranchAndBoundTree(unittest.TestCase):
 class TestBranchAndBound(unittest.TestCase):
 
     def setUp(self) -> None:
-        self.bb = BranchAndBound(small_branch)
-        self.unbounded_root = BaseNode(small_branch.lp, small_branch.integerIndices)
-        self.bound_root = BaseNode(small_branch.lp, small_branch.integerIndices)
-        self.bound_root.bound()
+        # reset models each test so lps dont keep added constraints
+        for name, m in {'small_branch_std': small_branch, 'infeasible_std': infeasible,
+                        'no_branch_std': no_branch}.items():
+            lp = m.lp
+            new_m = MILPInstance(A=m.A, b=m.b, c=lp.objective, l=m.l, sense=['Min', m.sense],
+                                 integerIndices=m.integerIndices, numVars=len(lp.objective))
+            new_m = BaseAlgorithm._convert_constraints_to_greq(new_m)
+            setattr(self, name, new_m)
+
+        self.bb = BranchAndBound(self.small_branch_std)
+        self.unbounded_root = BaseNode(BaseAlgorithm._convert_constraints_to_greq(self.small_branch_std).lp,
+                                       self.small_branch_std.integerIndices)
+        self.bound_root = BaseNode(BaseAlgorithm._convert_constraints_to_greq(self.small_branch_std).lp,
+                                   self.small_branch_std.integerIndices)
+        for constr in self.bound_root.lp.constraints:
+            if self.bound_root.cut_name_pattern.match(constr.name):
+                self.bound_root.lp.removeConstraint(constr.name)
+        self.bound_root.bound(gomory_cuts=False)
         self.root_branch_rtn = self.bound_root.branch()
 
     def test_init(self):
-        bb = BranchAndBound(small_branch)
+        bb = BranchAndBound(self.small_branch_std)
         self.assertTrue(isinstance(bb, BaseAlgorithm))
         self.assertTrue(bb.primal_bound == float('inf'))
         self.assertTrue(bb.dual_bound == -float('inf'))
@@ -97,41 +137,41 @@ class TestBranchAndBound(unittest.TestCase):
         self.assertTrue(bb.max_run_time == float('inf'))
 
     def test_init_fails_asserts(self):
-        bb = BranchAndBound(small_branch)
+        bb = BranchAndBound(self.small_branch_std)
         queue = PriorityQueue()
 
         # node_queue asserts
         for func in reversed(bb._queue_funcs):
             queue.__dict__[func] = 5
             self.assertRaisesRegex(AssertionError, f'node_queue needs a {func} function',
-                                   BranchAndBound, small_branch, BaseNode, queue)
+                                   BranchAndBound, self.small_branch_std, BaseNode, queue)
 
         # node limit asserts
         self.assertRaisesRegex(AssertionError, f'node limit', BranchAndBound,
-                               model=small_branch, node_limit=-5)
+                               model=self.small_branch_std, node_limit=-5)
 
         # mip gap asserts
         self.assertRaisesRegex(AssertionError, f'mip_gap', BranchAndBound,
-                               model=small_branch, mip_gap=-5)
+                               model=self.small_branch_std, mip_gap=-5)
 
         # logging asserts
         self.assertRaisesRegex(AssertionError, f'logging', BranchAndBound,
-                               model=small_branch, logging=0)
+                               model=self.small_branch_std, logging=0)
 
         # run time assert
         self.assertRaisesRegex(AssertionError, f'max_run_time', BranchAndBound,
-                               model=small_branch, max_run_time=0)
+                               model=self.small_branch_std, max_run_time=0)
 
         # initial primal bound assert
         self.assertRaisesRegex(AssertionError, f'initial_primal_bound', BranchAndBound,
-                               model=small_branch, initial_primal_bound=-float('inf'))
+                               model=self.small_branch_std, initial_primal_bound=-float('inf'))
 
         # kwargs asserts
         self.assertRaisesRegex(AssertionError, 'saved for later use', BranchAndBound,
-                               model=small_branch, right=-5)
+                               model=self.small_branch_std, right=-5)
 
     def test_current_gap(self):
-        bb = BranchAndBound(small_branch, node_limit=1, gomory_cuts=False)
+        bb = BranchAndBound(self.small_branch_std, node_limit=1, gomory_cuts=False)
         bb.solve()
         self.assertTrue(bb.current_gap is None)
         bb.node_limit = 10
@@ -145,7 +185,7 @@ class TestBranchAndBound(unittest.TestCase):
     def test_solve_stopped_on_time(self):
         # check and make sure we're good with both nodes
         for Node in [BaseNode, PCBDFSNode]:
-            bb = BranchAndBound(small_branch, Node=Node, max_run_time=.000001, pseudo_costs={})
+            bb = BranchAndBound(self.small_branch_std, Node=Node, max_run_time=.000001, pseudo_costs={})
             bb.solve()
             self.assertTrue(bb.status == 'stopped on iterations or time')
             self.assertTrue(bb.solve_time > .000001)
@@ -153,7 +193,7 @@ class TestBranchAndBound(unittest.TestCase):
     def test_solve_stopped_on_iterations(self):
         # check and make sure we're good with both nodes
         for Node in [BaseNode, PCBDFSNode]:
-            bb = BranchAndBound(small_branch, Node=Node, node_limit=1, pseudo_costs={},
+            bb = BranchAndBound(self.small_branch_std, Node=Node, node_limit=1, pseudo_costs={},
                                 gomory_cuts=False)
             bb.solve()
             self.assertTrue(bb.status == 'stopped on iterations or time')
@@ -162,7 +202,7 @@ class TestBranchAndBound(unittest.TestCase):
     def test_solve_optimal(self):
         # check and make sure we're good with both nodes
         for Node in [BaseNode, PCBDFSNode]:
-            bb = BranchAndBound(small_branch, Node=Node, pseudo_costs={})
+            bb = BranchAndBound(self.small_branch_std, Node=Node, pseudo_costs={})
             bb.solve()
             self.assertTrue(bb.status == 'optimal')
             self.assertTrue(all(s.is_integer for s in bb.solution))
@@ -172,7 +212,7 @@ class TestBranchAndBound(unittest.TestCase):
     def test_solve_infeasible(self):
         # check and make sure we're good with both nodes
         for Node in [BaseNode, PCBDFSNode]:
-            bb = BranchAndBound(infeasible, Node=Node, pseudo_costs={})
+            bb = BranchAndBound(infeasible2, Node=Node, pseudo_costs={})
             bb.solve()
             self.assertTrue(bb.status == 'infeasible')
             self.assertFalse(bb.solution)
@@ -203,7 +243,7 @@ class TestBranchAndBound(unittest.TestCase):
             self.assertFalse(en.called, 'were past the node limit')
 
     def test_evaluate_node_infeasible(self):
-        bb = BranchAndBound(infeasible)
+        bb = BranchAndBound(infeasible2)
         bb._evaluate_node(bb.root_node)
 
         # check attributes
@@ -226,7 +266,7 @@ class TestBranchAndBound(unittest.TestCase):
             self.assertTrue(bh.call_count == 0)
 
     def test_evaluate_node_fractional(self):
-        bb = BranchAndBound(small_branch, Node=PCBDFSNode, pseudo_costs={},
+        bb = BranchAndBound(self.small_branch_std, Node=PCBDFSNode, pseudo_costs={},
                             strong_branch_iters=5, gomory_cuts=False)
         bb._evaluate_node(bb.root_node)
 
@@ -323,9 +363,10 @@ class TestBranchAndBound(unittest.TestCase):
                                self.bb._process_branch_rtn, 0, rtn)
 
     def test_process_branch_rtn(self):
-        bb = BranchAndBound(small_branch)
-        node = BaseNode(small_branch.lp, small_branch.integerIndices, idx=0)
-        node.bound()
+        bb = BranchAndBound(self.small_branch_std)
+        node = BaseNode(BaseAlgorithm._convert_constraints_to_greq(self.small_branch_std).lp,
+                        self.small_branch_std.integerIndices, idx=0)
+        node.bound(gomory_cuts=False)
         rtn = node.branch(next_node_idx=1)
         left_node = rtn['left']
         right_node = rtn['right']
@@ -344,9 +385,10 @@ class TestBranchAndBound(unittest.TestCase):
         self.assertTrue(bb.tree.get_node(2).attr['node'] is right_node)
 
         # check function calls
-        bb = BranchAndBound(small_branch)
-        node = BaseNode(small_branch.lp, small_branch.integerIndices, 0)
-        node.bound()
+        bb = BranchAndBound(self.small_branch_std)
+        node = BaseNode(BaseAlgorithm._convert_constraints_to_greq(self.small_branch_std).lp,
+                        self.small_branch_std.integerIndices, idx=0)
+        node.bound(gomory_cuts=False)
         rtn = node.branch()
         with patch.object(bb, '_process_rtn') as pr, \
                 patch.object(bb.tree, 'add_left_child') as alc, \
@@ -357,12 +399,12 @@ class TestBranchAndBound(unittest.TestCase):
             self.assertTrue(arc.call_count == 1, 'should call add right child')
 
     def test_process_bound_rtn_fails_asserts(self):
-        bb = BranchAndBound(small_branch)
+        bb = BranchAndBound(self.small_branch_std)
         self.assertRaisesRegex(AssertionError, 'rtn must be a dictionary',
                                self.bb._process_bound_rtn, 'fish')
 
     def test_process_bound_rtn(self):
-        cglp_bb = BranchAndBound(small_branch, node_limit=8)
+        cglp_bb = BranchAndBound(self.small_branch_std, node_limit=8)
         cglp_bb.solve()
         cglp = CutGeneratingLP(cglp_bb, cglp_bb.root_node.idx)
         pi, pi0 = cglp.solve()
@@ -379,7 +421,7 @@ class TestBranchAndBound(unittest.TestCase):
                 self.assertTrue((node.cut_pool['node_0_cglp_cut'][1] == pi0).all())
 
     def test_find_dual_bound_fails_asserts(self):
-        bb = BranchAndBound(small_branch, gomory_cuts=False)
+        bb = BranchAndBound(self.small_branch_std, gomory_cuts=False)
         self.assertRaisesRegex(AssertionError, 'must solve this instance before',
                                bb.find_dual_bound, CyLPArray([2.5, 4.5]))
         bb.solve()
@@ -417,16 +459,16 @@ class TestBranchAndBound(unittest.TestCase):
             self.assertTrue(bound <= new_bb.objective_value + .01,
                             'dual bound value should be at most the value function for this rhs')
 
-        bb = BranchAndBound(small_branch, gomory_cuts=False)
+        bb = BranchAndBound(self.small_branch_std, gomory_cuts=False)
         bb.solve()
-        bound = bb.find_dual_bound(CyLPArray([2.5, 4.5]))
+        bound = bb.find_dual_bound(CyLPArray([-2.5, -4.5]))
 
         # just make sure the dual bound works here too
         self.assertTrue(bound <= -5.99,
                         'dual bound value should be at most the value function for this rhs')
 
         # check function calls
-        bb = BranchAndBound(small_branch, gomory_cuts=False)
+        bb = BranchAndBound(self.small_branch_std, gomory_cuts=False)
         bb.solve()
         bound_duals = [bb._bound_dual(n.lp) for n in bb.tree.get_node_instances([6, 12, 10, 8, 2])]
         with patch.object(bb, '_bound_dual') as bd:
@@ -434,7 +476,7 @@ class TestBranchAndBound(unittest.TestCase):
             bound = bb.find_dual_bound(CyLPArray([3, 3]))
             self.assertTrue(bd.call_count == 5)
 
-        bb = BranchAndBound(small_branch, gomory_cuts=False)
+        bb = BranchAndBound(self.small_branch_std, gomory_cuts=False)
         bb.solve()
         bound = bb.find_dual_bound(CyLPArray([3, 3]))
         with patch.object(bb, '_bound_dual') as bd:
@@ -511,7 +553,7 @@ class TestBranchAndBound(unittest.TestCase):
         self.assertTrue(lp.getStatusCode() == 0, 'lp should now be optimal')
 
     def test_bound_dual_fails_asserts(self):
-        bb = BranchAndBound(infeasible)
+        bb = BranchAndBound(self.infeasible_std)
         bb.solve()
         terminal_nodes = bb.tree.get_leaves(0)
         infeasible_nodes = [n for n in terminal_nodes if n.lp_feasible is False]
