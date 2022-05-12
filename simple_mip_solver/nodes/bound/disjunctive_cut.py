@@ -7,6 +7,7 @@ import re
 from simple_mip_solver import BaseNode
 from simple_mip_solver.utils.cut_generating_lp import CutGeneratingLP
 from simple_mip_solver.utils.floating_point import numerically_safe_cut
+from simple_mip_solver.utils.tolerance import min_cglp_norm
 
 G = TypeVar('G', bound='CuttingPlaneBoundNode')
 
@@ -16,17 +17,17 @@ class DisjunctiveCutBoundNode(BaseNode):
     class adds the following keyword arguments to Branch and Bound instantiation:
 
     max_cglp_calls (int): The max number of cutting plane generation iterations
-        to create disjunctive cuts
+        to create disjunctive cuts. Defaults to None.
     warm_start_cglp (bool): Whether or not to allow the CGLP to be warm started
-        from the previous call's optimal basis
+        from the previous call's optimal basis. Defaults to True.
     cglp_cumulative_constraints (bool): Whether or not to apply the disjunction
         in the CGLP to this node's constraints for all children nodes. If False,
         the same constraints used to generate this node's CGLP will be used for
-        generating its children.
+        generating its children. Defaults to True.
     cglp_cumulative_bounds (bool): Whether or not to intersect the disjunction
         in the CGLP with this node's variable bounds for all children nodes. If
         False, the same variable bounds used to generate this node's CGLP will
-        be used for generating its children.
+        be used for generating its children. Defaults to True.
     """
 
     def __init__(self: G, cglp: CutGeneratingLP = None,
@@ -41,8 +42,6 @@ class DisjunctiveCutBoundNode(BaseNode):
         :param kwargs: Key word arguments to pass on to super class instantiation
         """
         super().__init__(*args, **kwargs)
-        assert self._sense == '>=', 'must have Ax >= b'
-        assert self._variables_nonnegative, 'must have x >= 0 for all variables'
         if cglp is not None:
             assert isinstance(cglp, CutGeneratingLP), 'cglp must be CutGeneratingLP instance'
 
@@ -52,6 +51,7 @@ class DisjunctiveCutBoundNode(BaseNode):
         # flag tracking if current node or previous cut generation iteration added cglp
         self.previous_cglp_added = self.cglp is not None
         self.cglp_name_pattern = re.compile('^cut_cglp_')
+        self.current_cglp_name_pattern = re.compile(f'^cut_cglp_{self.idx}_')
         self.sharable_cuts = {}
         self.number_cglp_created = 0
         self.number_cglp_added = 0
@@ -98,7 +98,8 @@ class DisjunctiveCutBoundNode(BaseNode):
                                         for idx in removable_idxs)
         return removable_idxs
 
-    def _generate_cuts(self: G, max_cglp_calls: int = None, **kwargs) -> \
+    def _generate_cuts(self: G, max_cglp_calls: int = None,
+                       min_cglp_norm: float = min_cglp_norm, **kwargs) -> \
             Dict[str: Union[CyLPArray, float]]:
         """ Extend super's cut generation by making CGLP cuts if possible
 
@@ -108,24 +109,28 @@ class DisjunctiveCutBoundNode(BaseNode):
 
         :param max_cglp_calls: Number of cut generation iterations in which CGLP
         will try to add cuts
+        :param min_cglp_norm: smallest acceptable norm for disjunctive cut
         :param kwargs: dictionary of arguments to pass on to selected subroutines
         :return: dictionary of cuts that can be added to the LP relaxation
         """
         if max_cglp_calls is not None:
             assert isinstance(max_cglp_calls, int) and max_cglp_calls >= 0, \
                 'max_cglp_calls is a nonnegative integer'
+        assert isinstance(min_cglp_norm, (float, int)) and min_cglp_norm > 0, \
+            'min_cglp_norm is a positive number'
 
         max_cglp_calls = float('inf') if max_cglp_calls is None else max_cglp_calls
         cut_pool = super()._generate_cuts(**kwargs)
 
-        # dont do if parent or previous iteration couldnt find violated cglp cut
+        # dont do if parent or previous iteration's cglp failed to yield good cut
         if self.previous_cglp_added and self.cut_generation_iterations <= max_cglp_calls:
             pi, pi0 = self.cglp.solve(x_star=CyLPArray(self.solution),
                                       starting_basis=self._get_cglp_starting_basis(**kwargs))
-            idx = f'cut_cglp_{self.idx}_{self.cut_generation_iterations}'
-            pi, pi0 = (numerically_safe_cut(pi=pi, pi0=pi0, estimate='over'))
-            cut_pool[idx] = (pi, pi0)
-            self.number_cglp_created += 1
+            if pi is not None and pi0 is not None and np.linalg.norm(pi) > min_cglp_norm:
+                idx = f'cut_cglp_{self.idx}_{self.cut_generation_iterations}'
+                pi, pi0 = (numerically_safe_cut(pi=pi, pi0=pi0, estimate='over'))
+                cut_pool[idx] = (pi, pi0)
+                self.number_cglp_created += 1
 
         return cut_pool
 
@@ -174,15 +179,14 @@ class DisjunctiveCutBoundNode(BaseNode):
         self.previous_cglp_added = False
         added_cuts = super()._select_cuts(**kwargs)
         for idx, (pi, pi0) in added_cuts.items():
-            if self.cglp_name_pattern.match(idx):
-                # these could be true from adding CGLP from other node, but I think
-                # continuing to make CGLP's in that case is the most reasonable
-                self.current_node_added_cglp = True
-                self.previous_cglp_added = True
+            if self.cglp_name_pattern.match(idx):  # this node or previous node's cglps
                 self.number_cglp_added += 1
-                # if using original bounds and constraints, cut valid for other subproblems
-                if not cglp_cumulative_bounds and not cglp_cumulative_constraints:
-                    self.sharable_cuts[idx] = (pi, pi0)
+                if self.current_cglp_name_pattern.match(idx):  # only this node's cglp
+                    self.current_node_added_cglp = True  # marker for branching
+                    self.previous_cglp_added = True  # marker for next cut generation iteration
+                    # if using original bounds and constraints, cut valid for other subproblems
+                    if not cglp_cumulative_bounds and not cglp_cumulative_constraints:
+                        self.sharable_cuts[idx] = (pi, pi0)
 
         return added_cuts
 

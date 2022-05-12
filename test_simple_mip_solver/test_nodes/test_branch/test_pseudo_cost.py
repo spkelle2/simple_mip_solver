@@ -27,7 +27,7 @@ class TestNode(TestModels):
 
     def test_bound(self):
         node = PseudoCostBranchNode(small_branch_copy.lp, small_branch_copy.integerIndices)
-        rtn = node.bound({})
+        rtn = node.bound({}, gomory_cuts=False)
 
         # check assignments
         for idx, direction in product([1, 2], ['right', 'left']):
@@ -53,7 +53,7 @@ class TestNode(TestModels):
                 patch.object(node, '_base_bound') as bb, \
                 patch.object(node, '_update_pseudo_costs') as upc:
             cpc.return_value = []
-            node.bound({})
+            node.bound({}, gomory_cuts=False)
             self.assertTrue(cpc.call_count == 1)
             self.assertTrue(bb.call_count == 1)
             self.assertTrue(upc.call_count == 0)
@@ -64,7 +64,7 @@ class TestNode(TestModels):
                 patch.object(node, '_base_bound') as bb, \
                 patch.object(node, '_update_pseudo_costs') as upc:
             cpc.return_value = []
-            node.bound({})
+            node.bound({}, gomory_cuts=False)
             self.assertTrue(cpc.call_count == 1)
             self.assertTrue(bb.call_count == 1)
             self.assertTrue(upc.call_count == 1)
@@ -72,7 +72,7 @@ class TestNode(TestModels):
     def test_update_pseudo_costs(self):
         node = PseudoCostBranchNode(small_branch_copy.lp, small_branch_copy.integerIndices)
         node.pseudo_costs = {}
-        node._base_bound()
+        node._base_bound(gomory_cuts=False)
 
         # for root node (sb_index = 2)
         # check we call strong branch once and calculate costs twice for each sb_index
@@ -93,7 +93,7 @@ class TestNode(TestModels):
         left_node.pseudo_costs = {
             1: {'right': {'cost': 0, 'times': 1}, 'left': {'cost': 1, 'times': 1}},
             2: {'right': {'cost': 0, 'times': 1}, 'left': {'cost': 0, 'times': 1}}}
-        left_node._base_bound()
+        left_node._base_bound(gomory_cuts=False)
         with patch.object(left_node, '_strong_branch') as sb, \
                 patch.object(left_node, '_calculate_costs') as cc:
             sb.return_value = {'right': PseudoCostBranchNode(small_branch_copy.lp,
@@ -107,7 +107,7 @@ class TestNode(TestModels):
     def test_calculate_costs(self):
         node = PseudoCostBranchNode(small_branch_copy.lp, small_branch_copy.integerIndices)
         node.pseudo_costs = {}
-        node._base_bound()
+        node._base_bound(gomory_cuts=False)
 
         # check that each fractional index gets proper pseudo cost instantiated
         # check that infeasible strong branch direction gets (0, 1) ie right and x >= 2
@@ -125,7 +125,7 @@ class TestNode(TestModels):
         rtn = {k: v for k, v in node._base_branch(1).items() if k in ['left', 'right']}
         for direction, child_node in rtn.items():
             child_node.pseudo_costs = node.pseudo_costs
-            child_node._base_bound()
+            child_node._base_bound(gomory_cuts=False)
             child_node._calculate_costs(child_node)
         for direction in ['right', 'left']:
             self.assertTrue(node.pseudo_costs[1][direction]['times'] == 2)
@@ -145,7 +145,7 @@ class TestNode(TestModels):
 
     def test_branch(self):
         node = PseudoCostBranchNode(small_branch_copy.lp, small_branch_copy.integerIndices)
-        rtn = node.bound({})
+        rtn = node.bound({}, gomory_cuts=False)
 
         # check function calls
         with patch.object(node, '_check_pseudo_costs') as cpc, \
@@ -160,7 +160,7 @@ class TestNode(TestModels):
 
         # check return
         node = PseudoCostBranchNode(small_branch_copy.lp, small_branch_copy.integerIndices)
-        rtn = node.bound({})
+        rtn = node.bound({}, gomory_cuts=False)
         rtn = node.branch(rtn['pseudo_costs'], )
         for direction in ['right', 'left']:
             self.assertTrue(direction in rtn,

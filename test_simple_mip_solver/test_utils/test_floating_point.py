@@ -1,4 +1,4 @@
-from cylp.cy.CyClpSimplex import CyLPArray
+from cylp.cy.CyClpSimplex import CyLPArray, CyClpSimplex
 from math import isclose
 import numpy as np
 import unittest
@@ -49,65 +49,82 @@ class TestFloatingPoint(unittest.TestCase):
         with patch('simple_mip_solver.utils.floating_point.scale_cut') as sc, \
                 patch('simple_mip_solver.utils.floating_point.get_fraction') as gf:
             sc.return_value = (CyLPArray([.25, .5, 1]), 1)
-            gf.side_effect = [(1, 4), (1, 2), (1, 1)]
-            safe_pi, safe_pi0 = numerically_safe_cut(pi, pi0)
+            gf.side_effect = [(1, 4), (1, 2), (1, 1), (4, 1)]
+            safe_pi, safe_pi0 = numerically_safe_cut(pi, pi0, make_integer=True)
 
             self.assertTrue(sc.called)
-            self.assertTrue(gf.call_count == 3)
+            self.assertTrue(gf.call_count == 4)
             self.assertTrue(all(safe_pi == [1, 2, 4]))
             self.assertTrue(safe_pi0 == 4)
-
-        pi = CyLPArray([0, 0, 0])
-        pi0 = 3
-        safe_pi, safe_pi0 = numerically_safe_cut(pi=pi, pi0=pi0, estimate='over')
 
         # check returns
         runs = 100
         rand_pis = [CyLPArray(np.random.uniform(-10, 10, 4)) for i in range(runs)]
         rand_pi0s = [0] + [np.random.uniform(-10, 10) for i in range(runs - 1)]
         for pi, pi0 in zip(rand_pis, rand_pi0s):
-            if abs(pi0) < .1:
-                continue
-            # check overs
-            safe_pi, safe_pi0 = numerically_safe_cut(pi=pi, pi0=pi0, estimate='over')
-            self.assertTrue(all(np.equal(np.mod(safe_pi, 1), 0)), 'safe_pi must be integer')
-            if pi0 > 0:
-                # pi^T x >= pi0 <==> (pi/pi0)^T x >= 1
-                # pi_safe^T x >= pi0_safe <==> (pi_safe/pi0_safe)^T x >= 1
-                # safe is valid if pi_safe/pi0_safe >= pi/pi0 for pi0_safe, pi > 0, x >= 0
-                self.assertTrue(all(safe_pi/safe_pi0 + eps >= pi/pi0))
-            elif pi0 < 0:
-                # swap sign when dividing by negative, i.e. pi0_safe, pi < 0, x >= 0
-                self.assertTrue(all(safe_pi/safe_pi0 - eps <= pi/pi0))
-            else:
-                # since rhs is 0, back out the unscaled values
-                self.assertTrue(all(safe_pi/max(abs(safe_pi)) >= pi*min(abs(1/pi))))
-                self.assertTrue(safe_pi0 == pi0)
+            for make_integer in [True, False]:
+                # check overs
+                safe_pi, safe_pi0 = numerically_safe_cut(pi=pi, pi0=pi0, estimate='over',
+                                                         make_integer=make_integer)
+                if make_integer:
+                    self.assertTrue(all(np.equal(np.mod(safe_pi, 1), 0)), 'safe_pi must be integer')
 
-            # check unders - do the opposite of above
-            safe_pi, safe_pi0 = numerically_safe_cut(pi=pi, pi0=pi0, estimate='under')
-            self.assertTrue(all(np.equal(np.mod(safe_pi, 1), 0)), 'safe_pi must be integer')
-            if pi0 > 0:
-                self.assertTrue(all(safe_pi / safe_pi0 - eps <= pi / pi0))
-            elif pi0 < 0:
-                self.assertTrue(all(safe_pi / safe_pi0 + eps >= pi / pi0))
-            else:
-                self.assertTrue(all(safe_pi/max(abs(safe_pi)) <= pi*min(abs(1/pi))))
-                self.assertTrue(safe_pi0 == pi0)
+                # Find x such that safe_pi^T x >= safe_pi0 is as close to violated as possible
+                # nonnegative objective is expected, as no such point is possible
+                lp = CyClpSimplex()
+                x = lp.addVariable('x', len(pi))
+                lp += pi * x >= pi0
+                lp += x >= 0
+                lp.objective = safe_pi * x - safe_pi0
+                lp.primal()
+                if lp.getStatusCode() == 1:
+                    continue
+                sol = lp.primalVariableSolution['x']
+                if np.dot(pi, sol) - pi0 < -1e-14 and np.linalg.norm(sol) < 1e-8:
+                    sol = np.round(sol, 8)
+                # sanity check that the original constraint is not violated
+                self.assertTrue(np.dot(pi, sol) >= pi0 - 1e-14, '(pi, pi0) must be satisfied')
+                # confirm the safe cut is not violated either
+                self.assertTrue(np.dot(safe_pi, sol) >= safe_pi0 - 1e-14)
+
+                # check unders
+                safe_pi, safe_pi0 = numerically_safe_cut(pi=pi, pi0=pi0, estimate='under',
+                                                         make_integer=make_integer)
+                if make_integer:
+                    self.assertTrue(all(np.equal(np.mod(safe_pi, 1), 0)), 'safe_pi must be integer')
+
+                # Find x such that safe_pi^T x <= safe_pi0 is as close to violated as possible
+                lp = CyClpSimplex()
+                x = lp.addVariable('x', len(pi))
+                lp += pi * x <= pi0
+                lp += x >= 0
+                lp.objective = - safe_pi * x + safe_pi0
+                lp.primal()
+                if lp.getStatusCode() == 1:
+                    continue
+                sol = lp.primalVariableSolution['x']
+                if np.dot(pi, sol) - pi0 > 1e-14 and np.linalg.norm(sol) < 1e-8:
+                    sol = np.round(sol, 8)
+                # sanity check that the original constraint is not violated
+                self.assertTrue(np.dot(pi, sol) <= pi0 + 1e-14, '(pi, pi0) must be satisfied')
+                # confirm the safe cut is not violated either
+                self.assertTrue(np.dot(safe_pi, sol) <= safe_pi0 + 1e-14)
 
     def test_numerically_safe_cut_really_close(self):
         # over-estimate on just slightly rounded over
         pi = CyLPArray([1.25, 2.375, 4]) + eps/10
         pi0 = 4
-        safe_pi, safe_pi0 = numerically_safe_cut(pi=pi, pi0=pi0, estimate='over')
+        safe_pi, safe_pi0 = numerically_safe_cut(pi=pi, pi0=pi0, estimate='over',
+                                                 make_integer=True)
         self.assertTrue(all(safe_pi == np.array([10, 19, 32])))
-        self.assertTrue(isclose(safe_pi0, 32, abs_tol=eps))
+        self.assertTrue(isclose(safe_pi0, 31, abs_tol=eps))
 
         # under estimate on continued fractions
         # 16 digits will trick python into thinking equality but 15 won't
         pi = CyLPArray([1, .333333333333333, .666666666666667])
         pi0 = 1
-        safe_pi, safe_pi0 = numerically_safe_cut(pi=pi, pi0=pi0, estimate='under')
+        safe_pi, safe_pi0 = numerically_safe_cut(pi=pi, pi0=pi0, estimate='under',
+                                                 make_integer=True)
         self.assertTrue(all(safe_pi == np.array([3, 1, 2])))
         self.assertTrue(isclose(safe_pi0, 3, abs_tol=eps))
 
@@ -115,13 +132,15 @@ class TestFloatingPoint(unittest.TestCase):
     def test_numerically_safe_cut_high_dynamism(self):
         pi = CyLPArray([1, 100, 10000])
         pi0 = 100
-        safe_pi, safe_pi0 = numerically_safe_cut(pi=pi, pi0=pi0, estimate='over')
+        safe_pi, safe_pi0 = numerically_safe_cut(pi=pi, pi0=pi0, estimate='over',
+                                                 make_integer=True)
         self.assertTrue(all(safe_pi == np.array([100, 1, 100])))
         self.assertTrue(isclose(safe_pi0, 1, abs_tol=eps))
 
         pi = CyLPArray([100, 9999, 10000])
         pi0 = 100
-        safe_pi, safe_pi0 = numerically_safe_cut(pi=pi, pi0=pi0, estimate='under')
+        safe_pi, safe_pi0 = numerically_safe_cut(pi=pi, pi0=pi0, estimate='under',
+                                                 make_integer=True)
         self.assertTrue(all(safe_pi == np.array([1, 0, 100])))
         self.assertTrue(isclose(safe_pi0, 1, abs_tol=eps))
 

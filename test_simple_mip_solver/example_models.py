@@ -21,13 +21,13 @@ def generate_random_MILPInstance(numVars=40, numCons=20, density=0.2,
     b = CyLPArray(b)
     l = CyLPArray([0] * len(vs))
     u = CyLPArray([maxObjCoeff] * len(vs))
-    return MILPInstance(A=A, b=b, c=objective, l=l, u=u, sense=['Max', '<='],
+    return MILPInstance(A=-A, b=-b, c=-objective, l=l, u=u, sense=['Min', '>='],
                         integerIndices=list(range(len(vs))), numVars=len(vs))
 
 
 def generate_random_variety(scale=1):
-    constraints = {2*scale: 'low', 4*scale: 'high'}
-    variables = {2*scale: 'low', 4*scale: 'high'}
+    constraints = {int(2*scale): 'low', int(4*scale): 'high'}
+    variables = {int(2*scale): 'low', int(4*scale): 'high'}
     densities = {.2: 'low', .8: 'high'}
     max_obj_coeffs = {10: 'low', 100: 'high'}
     max_cons_coeffs = {10: 'low', 100: 'high'}
@@ -94,7 +94,7 @@ b = CyLPArray([1, 1, 1])
 c = CyLPArray([1, 1, 0])
 l = CyLPArray([0, 0, 0])
 
-no_branch = MILPInstance(A=A, b=b, c=c, l=l, sense=['Max', '<='],
+no_branch = MILPInstance(A=-A, b=-b, c=-c, l=l, sense=['Min', '>='],
                          integerIndices=[0, 1], numVars=3)
 
 
@@ -106,7 +106,7 @@ c = CyLPArray([1, 1, 1])
 l = CyLPArray([0, 0, 0])
 u = CyLPArray([10, 10, 10])
 
-small_branch = MILPInstance(A=A, b=b, c=c, l=l, u=u, sense=['Max', '<='],
+small_branch = MILPInstance(A=-A, b=-b, c=-c, l=l, u=u, sense=['Min', '>='],
                             integerIndices=[0, 1, 2], numVars=3)
 
 # a copy of the above to avoid test_pseudo_cost failing when running all tests in series
@@ -118,8 +118,19 @@ c = CyLPArray([1, 1, 1])
 l = CyLPArray([0, 0, 0])
 u = CyLPArray([10, 10, 10])
 
-small_branch_copy = MILPInstance(A=A, b=b, c=c, l=l, u=u, sense=['Max', '<='],
+small_branch_copy = MILPInstance(A=-A, b=-b, c=-c, l=l, u=u, sense=['Min', '>='],
                                  integerIndices=[0, 1, 2], numVars=3)
+
+# a copy of the above to have constraints in <= form for base algorithm tests
+A = np.matrix([[1, 0, 1],
+               [0, 1, 0]])
+b = CyLPArray([1.5, 1.25])
+c = CyLPArray([1, 1, 1])
+l = CyLPArray([0, 0, 0])
+u = CyLPArray([10, 10, 10])
+
+small_branch_max = MILPInstance(A=A, b=b, c=c, l=l, u=u, sense=['Max', '<='],
+                                integerIndices=[0, 1, 2], numVars=3)
 
 # ------------------------ a model that is infeasible ------------------------
 A = np.matrix([[1, 1, 0]])
@@ -127,7 +138,7 @@ b = CyLPArray([-1])
 c = CyLPArray([1, 1, 0])
 l = CyLPArray([0, 0, 0])
 
-infeasible = MILPInstance(A=A, b=b, c=c, l=l, sense=['Max', '<='],
+infeasible = MILPInstance(A=-A, b=-b, c=-c, l=l, sense=['Min', '>='],
                           integerIndices=[0, 1], numVars=3)
 
 # --------------------- another model that is infeasible ---------------------
@@ -137,7 +148,7 @@ b = CyLPArray([-1, 1])
 c = CyLPArray([1, 1, 0])
 l = CyLPArray([0, 0, 0])
 
-infeasible2 = MILPInstance(A=A, b=b, c=c, l=l, sense=['Max', '<='],
+infeasible2 = MILPInstance(A=-A, b=-b, c=-c, l=l, sense=['Min', '>='],
                            integerIndices=[0, 1], numVars=3)
 
 # ------------------------ a model that is unbounded -------------------------
@@ -148,7 +159,7 @@ b = CyLPArray([1/2],
 c = CyLPArray([1, 1])
 l = CyLPArray([0, 0])
 
-unbounded = MILPInstance(A=A, b=b, c=c, l=l, sense=['Max', '<='],
+unbounded = MILPInstance(A=-A, b=-b, c=-c, l=l, sense=['Min', '>='],
                          integerIndices=[0, 1], numVars=2)
 
 # ----------------------- a larger model that is random ----------------------
@@ -164,7 +175,7 @@ b = CyLPArray([[115],
 c = CyLPArray([0, 1])
 l = CyLPArray([0, 0])
 
-cut1 = MILPInstance(A=A, b=b, c=c, l=l, sense=['Max', '<='],
+cut1 = MILPInstance(A=-A, b=-b, c=-c, l=l, sense=['Min', '>='],
                     integerIndices=[0, 1], numVars=2)
 
 # ---------------- a model for testing cutting plane methods -----------------
@@ -177,7 +188,7 @@ b = CyLPArray([[28],
 c = CyLPArray([2, 5])
 l = CyLPArray([0, 0])
 
-cut2 = MILPInstance(A=A, b=b, c=c, l=l, sense=['Max', '<='],
+cut2 = MILPInstance(A=-A, b=-b, c=-c, l=l, sense=['Min', '>='],
                     integerIndices=[0, 1], numVars=2)
 
 # --------- instance from ISE 418 HW 3 problem 1 to test dual bound ----------
@@ -274,7 +285,7 @@ b = CyLPArray([[1.5],
                [1.5]])
 c = CyLPArray([1, 1])
 l = CyLPArray([0, 0])
-square = MILPInstance(A=A, b=b, c=c, l=l, sense=['Max', '<='],
+square = MILPInstance(A=-A, b=-b, c=-c, l=l, sense=['Min', '>='],
                       integerIndices=[0, 1], numVars=2)
 
 # ----------------------------- negative instance ------------------------------
@@ -284,7 +295,7 @@ b = CyLPArray([[-.5],
                [.5]])
 c = CyLPArray([1, 1])
 l = CyLPArray([-1, -1])
-negative = MILPInstance(A=A, b=b, c=c, l=l, sense=['Max', '<='],
+negative = MILPInstance(A=-A, b=-b, c=-c, l=l, sense=['Min', '>='],
                         integerIndices=[0, 1], numVars=2)
 
 # ------------------------- model to test gomory cuts --------------------------
@@ -300,5 +311,5 @@ cut3 = MILPInstance(A=A, b=b, c=c, l=l, sense=['Min', '>='],
                     integerIndices=[0, 1], numVars=2)
 
 if __name__ == '__main__':
-    generate_random_variety(scale=4)
+    generate_random_variety(scale=1)
     # generate_random_value_functions()

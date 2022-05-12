@@ -11,8 +11,9 @@ from typing import Union, List, TypeVar, Dict, Any, Tuple, Set
 from simple_mip_solver.utils.floating_point import numerically_safe_cut
 from simple_mip_solver.utils.tolerance import variable_epsilon,\
     good_coefficient_approximation_epsilon, max_nonzero_coefs, parallel_cut_tolerance, \
-    cutting_plane_progress_tolerance, max_cut_generation_iterations
-from test_simple_mip_solver.test_utils.test_utils import check_cut_against_grid
+    cutting_plane_progress_tolerance, max_cut_generation_iterations, max_relative_cut_term_ratio, \
+    min_cut_depth
+from test_simple_mip_solver.test_utils.test_utils import check_cut_against_grid, check_cut
 
 T = TypeVar('T', bound='BaseNode')
 
@@ -42,6 +43,7 @@ class BaseNode:
         :param args: spillover for extra arguments passed by the API not needed for instantiation
         :param kwargs: spillover for extra arguments passed by the API not needed for instantiation
         """
+        # check inputs
         assert isinstance(lp, CyClpSimplex), 'lp must be CyClpSimplex instance'
         assert all(0 <= idx < lp.nVariables and isinstance(idx, int) for idx in
                    integer_indices), 'indices must match variables'
@@ -97,6 +99,11 @@ class BaseNode:
         self.number_gmic_removed = 0
         self.gmic_name_pattern = re.compile('^cut_gomory_')
         self._cut_pool = {}
+        self.max_term = np.max(np.abs(self.lp.constraints[0].varCoefs[self.lp.getVarByName('x')]))
+
+        # check formatting
+        assert self._sense == '>=', 'must have Ax >= b'
+        assert self._variables_nonnegative, 'must have x >= 0 for all variables'
 
     @property
     def cut_pool(self):
@@ -278,6 +285,8 @@ class BaseNode:
         if gomory_cuts:
             for row_idx, (pi, pi0) in self._find_gomory_cuts().items():
                 idx = f'cut_gomory_{self.idx}_{self.cut_generation_iterations}_{row_idx}'
+                # if idx == 'cut_gomory_5_2_2':
+                #     print()
                 safe_pi, safe_pi0 = numerically_safe_cut(pi=pi, pi0=pi0, estimate='over')
                 cut_pool[idx] = safe_pi, safe_pi0
 
@@ -285,19 +294,31 @@ class BaseNode:
         return cut_pool
 
     def _select_cuts(self, max_nonzero_coefs: int = max_nonzero_coefs,
+                     min_cut_depth: float = min_cut_depth,
                      parallel_cut_tolerance: float = parallel_cut_tolerance,
+                     max_relative_cut_term_ratio: float = max_relative_cut_term_ratio,
                      **kwargs) -> Dict[str, Union[CyLPArray, float]]:
         """ Pick the best subset of cuts from the cut pool. Best is defined by
         deepest cuts that are not too parallel to one another.
 
-        :param cut_pool: dictionary of cuts that can be added
+        max_nonzero_coefs: maximum number of nonzero coefficients in allowable cut
+        min_cut_depth: minimum euclidean distance between cut and relaxation solution
+        to add cut to model
+        parallel_cut_tolerance: number of degrees two cuts are within to be considered
+        too parallel
+        max_relative_cut_term_ratio: largest allowed ratio of absolute values of
+        cut coef to root LP relaxation coef
         :param kwargs: dictionary of arguments to pass on to selected subroutines
         :return: dictionary of cuts chosen to be added
         """
         assert isinstance(max_nonzero_coefs, int) and 0 < max_nonzero_coefs, \
             'max_nonzero_coefs must be positive int'
+        assert isinstance(min_cut_depth, (float, int)) and 0 < min_cut_depth, \
+            'min_cut_depth must be > 0'
         assert 0 < parallel_cut_tolerance <= 90, \
             'parallel_cut_tolerance must be number in (0, 90]'
+        assert isinstance(max_relative_cut_term_ratio, (int, float)) and \
+            0 < max_relative_cut_term_ratio, 'max_relative_cut_term_ratio must be positive'
 
         def nonzero_coefs(pi):
             return sum((pi > good_coefficient_approximation_epsilon) +
@@ -313,9 +334,12 @@ class BaseNode:
         # add cuts in order of depth of violation
         for idx in sorted(cut_depths, key=cut_depths.get):
             # if cuts are no longer violated by current optimal solution, break
-            if cut_depths[idx] >= 0:
+            if cut_depths[idx] >= -min_cut_depth:
                 break
             (pi, pi0) = self.cut_pool[idx]
+            # if cut has terms too much larger than root LP relaxation, toss it
+            if np.max(np.abs(pi)) > max_relative_cut_term_ratio * self.max_term:
+                continue
             parallel_cut = False
             # select most useful cuts by ensuring >10 degrees between this cut and others added
             for pi_prime, pi0_prime in added_cuts.values():
@@ -328,7 +352,8 @@ class BaseNode:
                     break
             if not parallel_cut:
                 # uncomment to check if cut is valid
-                # check_cut_against_grid(lp=self.lp, pi=pi, pi0=pi0, max_val=5)
+                # check_cut_against_grid(lp=self.lp, pi=pi, pi0=pi0, max_val=20)
+                # check_cut(sol=[0, 0, 3, 0], lp=self.lp, pi=pi, pi0=pi0)
                 cut = pi * self.lp.getVarByName('x') >= pi0
                 self.lp.addConstraint(cut, idx)
                 added_cuts[idx] = (pi, pi0)
@@ -392,8 +417,11 @@ class BaseNode:
             return None
         A = np.concatenate((self.lp.coefMatrix.toarray(), -np.identity(self.lp.nConstraints)), axis=1)
         A_B = A[:, B]
-        A_B_inv = np.linalg.inv(A_B)
-        return A_B_inv @ A
+        try:
+            A_B_inv = np.linalg.inv(A_B)
+            return A_B_inv @ A
+        except np.linalg.LinAlgError:  # catch singular matrices
+            return None
     
     @property
     def basic_variable_indices(self):
@@ -547,6 +575,10 @@ class BaseNode:
             return self.dual_bound < other.dual_bound
         else:
             raise TypeError('A Node can only be compared with another Node')
+
+    # name
+    def __repr__(self):
+        return f'node {self.idx}'
 
     @property
     def _sense(self: T):

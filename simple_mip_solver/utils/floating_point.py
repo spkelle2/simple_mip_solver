@@ -38,7 +38,7 @@ def scale_cut(pi: np.ndarray, pi0: float, max_abs: float = 1, **kwargs) -> \
 
 
 def numerically_safe_cut(pi: CyLPArray, pi0: float, estimate: str = 'over',
-                         **kwargs) -> Tuple[CyLPArray, float]:
+                         make_integer: bool = False, **kwargs) -> Tuple[CyLPArray, float]:
     """ Convert (pi, pi0) to a close, outer-approximation with integer coefficients.
 
     Note: For max_term used in get_fraction(), nonzero coefficients <
@@ -61,14 +61,19 @@ def numerically_safe_cut(pi: CyLPArray, pi0: float, estimate: str = 'over',
     :param pi: constraint coefficients to approximate
     :param pi0: constraint bound
     :param estimate: 'over' generates outer approximation for pi^T x >= pi0.
-    'under' generates outer approximation for pi^T x <= pi0.
+    'under' generates outer approximation for pi^T x <= pi0. Names based on whether
+    cut coefficients are over or under approximated.
+    :param make_integer: True multiplies all coefficients and the cut bound by the
+    least common multiple of coefficient denominators so the coefficients are integer.
+    False returns the coefficients and bound as fractions
     :param kwargs: placeholder for extra arguments passed along to subroutines
     :return: (safe_pi, safe_pi0), a close, outer-approximation of (pi, pi0) with
     integer coefficients
     """
+    estimates = ['over', 'under']
     assert isinstance(pi, CyLPArray), 'pi is a CyLPArray'
     assert isinstance(pi0, float) or isinstance(pi0, int), 'pi0 is a number'
-    assert estimate in ['over', 'under'], 'estimate must be over or under to ensure safety'
+    assert estimate in estimates, 'estimate must be over or under to ensure safety'
 
     nums, dens = [], []
 
@@ -89,8 +94,11 @@ def numerically_safe_cut(pi: CyLPArray, pi0: float, estimate: str = 'over',
     lcm = np.lcm.reduce(dens)
     # floating point error from doing this can make a tight approximation invalid
     # but I'm betting the floating point error is small enough CLP will tolerate it
-    safe_pi = CyLPArray(lcm*np.array(nums)/np.array(dens))
-    safe_pi0 = pi0_scaled*lcm
+    safe_pi = CyLPArray((lcm if make_integer else 1)*np.array(nums)/np.array(dens))
+    # opposite estimate for other side of constraint
+    n, d = get_fraction(x=pi0_scaled*lcm if make_integer else pi0_scaled,
+                        estimate='under' if estimate == 'over' else 'over')
+    safe_pi0 = n/d
 
     return safe_pi, safe_pi0
 
