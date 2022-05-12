@@ -157,11 +157,13 @@ class CutGeneratingLP:
         # add constraints
         for i, constr in constrs.items():
             # (pi, pi0) must be valid for each disjunctive term's LP relaxation
-            lp += 0 >= -pi + constr['A'].T * u[i] + np.matrix(np.eye(num_vars)) * w[i] - \
-                  np.matrix(np.eye(num_vars)) * v[i]
-            lp += 0 <= -pi0 + constr['b'] * u[i] + lb[i] * w[i] - ub[i] * v[i]
+            lp.addConstraint(0 >= -pi + constr['A'].T * u[i] + np.matrix(np.eye(num_vars)) * w[i] -
+                             np.matrix(np.eye(num_vars)) * v[i], name=f'Au_{i} + Iw_{i} - Iv{i} <= pi')
+            lp.addConstraint(0 <= -pi0 + constr['b'] * u[i] + lb[i] * w[i] - ub[i] * v[i],
+                             name=f'bu_{i} + lbw_{i} - ubv{i} >= pi0')
         # normalize variables so they don't grow arbitrarily
-        lp += sum(var.sum() for var_dict in [u, w, v] for var in var_dict.values()) == 1
+        lp.addConstraint(sum(var.sum() for var_dict in [u, w, v] for var in var_dict.values()) == 1,
+                         name='normalize')
 
         # set objective: find the deepest cut
         # since pi * x >= pi0 for all x in disjunction, we want min pi * x_star - pi0

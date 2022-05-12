@@ -37,7 +37,7 @@ class PseudoCostBranchNode(BaseNode):
         assert not problems, f'pseudo cost dict has following errors: {problems}'
         self.pseudo_costs = pseudo_costs
         self.strong_branch_iters = strong_branch_iters
-        rtn = self._base_bound(**kwargs)
+        rtn = super().bound(**kwargs)
         if self.lp_feasible:
             self._update_pseudo_costs()
         rtn['pseudo_costs'] = self.pseudo_costs

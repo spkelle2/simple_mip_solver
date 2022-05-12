@@ -27,16 +27,6 @@ class TestNode(TestModels):
             setattr(self, name, new_m)
 
     def test_init_fails_asserts(self):
-        self.assertRaisesRegex(AssertionError, 'must have Ax >= b',
-                               DisjunctiveCutBoundNode, lp=cut1.lp, integer_indices=cut1.integerIndices)
-        l = self.cut1_std.lp.variablesLower.copy()
-        l[0] = -10
-        self.cut1_std.lp.variablesLower = l
-        self.assertRaisesRegex(AssertionError, 'must have x >= 0 for all variables',
-                               DisjunctiveCutBoundNode, lp=self.cut1_std.lp,
-                               integer_indices=self.cut1_std.integerIndices)
-
-    def test_init_fails_asserts2(self):
         bb = BranchAndBound(self.cut1_std)
         bb.solve()
         cglp = CutGeneratingLP(bb, bb.root_node.idx)
@@ -144,16 +134,37 @@ class TestNode(TestModels):
                 patch('simple_mip_solver.nodes.bound.disjunctive_cut.numerically_safe_cut') as nsc, \
                 patch.object(node, '_get_cglp_starting_basis') as gcsb:
             gc.return_value = {}
-            s.return_value = (CyLPArray([0, 1]), 1)
+            s.side_effect = [(None, None), (CyLPArray([1e-12, 1e-8]), 1e-10),
+                             (CyLPArray([0, 1]), 1)]
             nsc.return_value = (CyLPArray([0, 1]), 1)
             gcsb.return_value = None
 
-            # previous cglp added and max_cglp_calls more
+            # previous cglp added and max_cglp_calls more on no cut
             cut_pool = node._generate_cuts()
             self.assertTrue(gc.call_count == 1)
             self.assertTrue(s.call_count == 1)
             self.assertTrue(s.call_args.kwargs['starting_basis'] is None)
             self.assertTrue(gcsb.call_count == 1)
+            self.assertTrue(nsc.call_count == 0)
+            self.assertFalse(cut_pool)
+            self.assertFalse(node.number_cglp_created)
+
+            # previous cglp added and max_cglp_calls more on small cut
+            cut_pool = node._generate_cuts()
+            self.assertTrue(gc.call_count == 2)
+            self.assertTrue(s.call_count == 2)
+            self.assertTrue(s.call_args.kwargs['starting_basis'] is None)
+            self.assertTrue(gcsb.call_count == 2)
+            self.assertTrue(nsc.call_count == 0)
+            self.assertFalse(cut_pool)
+            self.assertFalse(node.number_cglp_created)
+
+            # previous cglp added and max_cglp_calls more on good cut
+            cut_pool = node._generate_cuts()
+            self.assertTrue(gc.call_count == 3)
+            self.assertTrue(s.call_count == 3)
+            self.assertTrue(s.call_args.kwargs['starting_basis'] is None)
+            self.assertTrue(gcsb.call_count == 3)
             self.assertTrue(nsc.call_count == 1)
             self.assertTrue({cut for cut in cut_pool} == {'cut_cglp_0_0'})
             self.assertTrue(node.number_cglp_created == 1)
@@ -258,16 +269,17 @@ class TestNode(TestModels):
 
         # check function calls
         with patch('simple_mip_solver.nodes.base_node.BaseNode._select_cuts') as sc:
-            # no cglp cut
-            sc.return_value = {'cut_gomory_0_0_0': (CyLPArray([1, 0]), 1)}
+            # no cglp cut from this node
+            sc.return_value = {'cut_gomory_0_0_0': (CyLPArray([1, 0]), 1),
+                               'cut_cglp_1_0': (CyLPArray([0, 1]), 1)}
             added_cuts = node._select_cuts(cglp_cumulative_constraints=False,
                                            cglp_cumulative_bounds=False)
             self.assertTrue(sc.call_count == 1)
             self.assertFalse(node.current_node_added_cglp)
             self.assertFalse(node.previous_cglp_added)
             self.assertFalse(node.sharable_cuts)
-            self.assertFalse(node.number_cglp_added)
-            self.assertTrue({c for c in added_cuts} == {'cut_gomory_0_0_0'})
+            self.assertTrue(node.number_cglp_added == 1)
+            self.assertTrue({c for c in added_cuts} == {'cut_gomory_0_0_0', 'cut_cglp_1_0'})
 
             # yes cglp cut
             sc.return_value = {'cut_cglp_0_0': (CyLPArray([0, 1]), 1),
@@ -279,7 +291,7 @@ class TestNode(TestModels):
             self.assertTrue(sc.call_count == 2)
             self.assertTrue(node.current_node_added_cglp)
             self.assertTrue(node.previous_cglp_added)
-            self.assertTrue(node.number_cglp_added == 1)
+            self.assertTrue(node.number_cglp_added == 2)
             self.assertFalse(node.sharable_cuts)
             self.assertTrue({c for c in added_cuts} == {'cut_cglp_0_0', 'cut_gomory_0_0_0'})
 
@@ -289,7 +301,7 @@ class TestNode(TestModels):
             self.assertTrue(sc.call_count == 3)
             self.assertTrue(node.current_node_added_cglp)
             self.assertTrue(node.previous_cglp_added)
-            self.assertTrue(node.number_cglp_added == 2)
+            self.assertTrue(node.number_cglp_added == 3)
             self.assertFalse(node.sharable_cuts)
             self.assertTrue({c for c in added_cuts} == {'cut_cglp_0_0', 'cut_gomory_0_0_0'})
 
@@ -298,7 +310,7 @@ class TestNode(TestModels):
             self.assertTrue(sc.call_count == 4)
             self.assertTrue(node.current_node_added_cglp)
             self.assertTrue(node.previous_cglp_added)
-            self.assertTrue(node.number_cglp_added == 3)
+            self.assertTrue(node.number_cglp_added == 4)
             self.assertFalse(node.sharable_cuts)
             self.assertTrue({c for c in added_cuts} == {'cut_cglp_0_0', 'cut_gomory_0_0_0'})
 
@@ -308,7 +320,7 @@ class TestNode(TestModels):
             self.assertTrue(sc.call_count == 5)
             self.assertTrue(node.current_node_added_cglp)
             self.assertTrue(node.previous_cglp_added)
-            self.assertTrue(node.number_cglp_added == 4)
+            self.assertTrue(node.number_cglp_added == 5)
             self.assertTrue(node.sharable_cuts)
             self.assertTrue({c for c in added_cuts} == {'cut_cglp_0_0', 'cut_gomory_0_0_0'})
 

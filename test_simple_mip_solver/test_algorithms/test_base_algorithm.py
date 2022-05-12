@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from simple_mip_solver import BaseNode
 from simple_mip_solver.algorithms.base_algorithm import BaseAlgorithm
-from test_simple_mip_solver.example_models import small_branch, h3p1
+from test_simple_mip_solver.example_models import small_branch, h3p1, small_branch_max
 
 
 class TestBaseAlgorithm(unittest.TestCase):
@@ -18,7 +18,7 @@ class TestBaseAlgorithm(unittest.TestCase):
 
     def test_init(self):
 
-        alg = BaseAlgorithm(small_branch, BaseNode, self._node_attributes, self._node_funcs)
+        alg = BaseAlgorithm(small_branch_max, BaseNode, self._node_attributes, self._node_funcs)
 
         # check attributes
         self.assertTrue(alg._swapped_constraint_direction)
@@ -92,10 +92,10 @@ class TestBaseAlgorithm(unittest.TestCase):
 
     def test_convert_constraints_to_greq(self):
         # check one that needs changed
-        m = BaseAlgorithm._convert_constraints_to_greq(small_branch)
+        m = BaseAlgorithm._convert_constraints_to_greq(small_branch_max)
         self.assertTrue(m.sense == '>=')
-        self.assertTrue((-m.A == small_branch.A).all())
-        self.assertTrue((-m.b == small_branch.b).all())
+        self.assertTrue((-m.A == small_branch_max.A).all())
+        self.assertTrue((-m.b == small_branch_max.b).all())
 
         # check one that doesnt
         m2 = BaseAlgorithm._convert_constraints_to_greq(m)

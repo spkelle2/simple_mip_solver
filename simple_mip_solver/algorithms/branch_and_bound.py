@@ -2,10 +2,9 @@ import numpy as np
 from coinor.cuppy.milpInstance import MILPInstance
 from coinor.gimpy.tree import BinaryTree
 from cylp.cy.CyClpSimplex import CyClpSimplex, CyLPArray
-from cylp.py.modeling import CyLPExpr
 from queue import PriorityQueue
 import time
-from typing import Any, Dict, TypeVar, List, Union, Iterable, Type
+from typing import Any, Dict, TypeVar, List, Union, Iterable, Type, Tuple
 
 from simple_mip_solver.algorithms.base_algorithm import BaseAlgorithm
 from simple_mip_solver.nodes.base_node import BaseNode
@@ -29,6 +28,20 @@ class BranchAndBoundTree(BinaryTree):
         assert subtree_root_id in self, 'subtree_root_id must belong to the tree'
         return [n.attr['node'] for n in self.nodes.values() if n.attr['node'].is_leaf
                 and subtree_root_id in n.attr['node'].lineage]
+
+    def get_disjunction(self: BT, subtree_root_id: int) -> List[Tuple[np.ndarray, np.ndarray]]:
+        """ Return the disjunction encoded in the terminal leaves of the branch
+        and bound subtree rooted at node with id <subtree_root_id>
+
+        :param subtree_root_id: subtree_root_id: The id of the node that roots our subtree
+        :return: a list of pairs of arrays, (lb, ub). For x to be a feasible solution,
+        there must be a (lb, ub) pair in the list such that lb <= x <= ub
+        """
+        assert subtree_root_id in self, 'subtree_root_id must belong to the tree'
+        disjunctive_nodes = [n for n in self.get_leaves(subtree_root_id)
+                             if n.lp_feasible is not False]
+        return [(n.lp.variablesLower.copy(), n.lp.variablesUpper.copy())
+                for n in disjunctive_nodes]
 
     # make this work with just one node passed
     def get_node_instances(self: BT, node_ids: Union[int, Iterable[int]]) -> List[BaseNode]:

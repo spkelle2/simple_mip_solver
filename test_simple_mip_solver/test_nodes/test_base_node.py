@@ -17,7 +17,7 @@ from unittest.mock import patch, PropertyMock
 from simple_mip_solver import BaseNode
 from simple_mip_solver.algorithms.base_algorithm import BaseAlgorithm
 from test_simple_mip_solver.example_models import no_branch, small_branch, \
-    infeasible, random, unbounded, cut2, cut1, negative, cut3
+    infeasible, random, unbounded, cut2, cut1, small_branch_copy, cut3, small_branch_max
 from test_simple_mip_solver.helpers import TestModels
 
 
@@ -28,14 +28,14 @@ class TestBaseNode(TestModels):
         for name, m in {'cut1_std': cut1, 'cut2_std': cut2, 'cut3_std': cut3,
                         'infeasible_std': infeasible, 'no_branch_std': no_branch,
                         'small_branch_std': small_branch}.items():
-            lp = m.lp
-            new_m = MILPInstance(A=m.A, b=m.b, c=lp.objective, l=m.l, sense=['Min', m.sense],
-                                 integerIndices=m.integerIndices, numVars=len(lp.objective))
+            new_m = MILPInstance(A=m.A, b=m.b, c=m.lp.objective, l=m.l, u=m.u,
+                                 sense=['Min', m.sense], integerIndices=m.integerIndices,
+                                 numVars=len(m.lp.objective))
             new_m = BaseAlgorithm._convert_constraints_to_greq(new_m)
             setattr(self, name, new_m)
 
     def test_init(self):
-        node = BaseNode(small_branch.lp, small_branch.integerIndices)
+        node = BaseNode(self.small_branch_std.lp, self.small_branch_std.integerIndices)
         self.assertTrue(node.lp, 'should get a model on proper instantiation')
         self.assertTrue(node._integer_indices == [0, 1, 2], 'should have list of integer indices')
         self.assertFalse(node.idx, 'idx should be None')
@@ -66,54 +66,64 @@ class TestBaseNode(TestModels):
         self.assertFalse(node.cut_pool)
 
     def test_init_lineage(self):
-        node = BaseNode(small_branch.lp, small_branch.integerIndices, idx=0)
+        node = BaseNode(self.small_branch_std.lp, self.small_branch_std.integerIndices, idx=0)
         self.assertTrue(node.lineage == (0,))
 
-        node = BaseNode(small_branch.lp, small_branch.integerIndices, ancestors=(0,))
+        node = BaseNode(self.small_branch_std.lp, self.small_branch_std.integerIndices, ancestors=(0,))
         self.assertTrue(node.lineage == (0,))
 
-        node = BaseNode(small_branch.lp, small_branch.integerIndices, idx=3,
+        node = BaseNode(self.small_branch_std.lp, self.small_branch_std.integerIndices, idx=3,
                         ancestors=(0, 1))
         self.assertTrue(node.lineage == (0, 1, 3))
 
     def test_init_fails_asserts(self):
         self.assertRaisesRegex(AssertionError, 'lp must be CyClpSimplex instance',
-                               BaseNode, small_branch, small_branch.integerIndices)
+                               BaseNode, self.small_branch_std, self.small_branch_std.integerIndices)
         self.assertRaisesRegex(AssertionError, 'indices must match variables',
-                               BaseNode, small_branch.lp, [4])
+                               BaseNode, self.small_branch_std.lp, [4])
         self.assertRaisesRegex(AssertionError, 'node idx must be integer',
-                               BaseNode, small_branch.lp, small_branch.integerIndices,
+                               BaseNode, self.small_branch_std.lp, self.small_branch_std.integerIndices,
                                idx=0.5)
         self.assertRaisesRegex(AssertionError, 'indices must be distinct',
-                               BaseNode, small_branch.lp, [0, 1, 1])
+                               BaseNode, self.small_branch_std.lp, [0, 1, 1])
         self.assertRaisesRegex(AssertionError, 'dual bound must be a float or an int',
-                               BaseNode, small_branch.lp, small_branch.integerIndices,
+                               BaseNode, self.small_branch_std.lp, self.small_branch_std.integerIndices,
                                dual_bound='five')
         self.assertRaisesRegex(AssertionError, 'none are none or all are none',
-                               BaseNode, small_branch.lp, small_branch.integerIndices,
+                               BaseNode, self.small_branch_std.lp, self.small_branch_std.integerIndices,
                                b_dir='up')
         self.assertRaisesRegex(AssertionError, 'branch index corresponds to integer variable if it exists',
-                               BaseNode, small_branch.lp, small_branch.integerIndices,
+                               BaseNode, self.small_branch_std.lp, self.small_branch_std.integerIndices,
                                b_idx=4, b_dir='right', b_val=.5)
         self.assertRaisesRegex(AssertionError, 'we can only branch right or left',
-                               BaseNode, small_branch.lp, small_branch.integerIndices,
+                               BaseNode, self.small_branch_std.lp, self.small_branch_std.integerIndices,
                                b_idx=1, b_dir='sideways', b_val=.5)
         self.assertRaisesRegex(AssertionError, 'branch val should be within 1 of both bounds',
-                               BaseNode, small_branch.lp, small_branch.integerIndices,
+                               BaseNode, self.small_branch_std.lp, self.small_branch_std.integerIndices,
                                b_idx=1, b_dir='right', b_val=.5)
         self.assertRaisesRegex(AssertionError, 'depth is a positive integer',
-                               BaseNode, small_branch.lp, small_branch.integerIndices,
+                               BaseNode, self.small_branch_std.lp, self.small_branch_std.integerIndices,
                                depth=2.5)
         self.assertRaisesRegex(AssertionError, 'node idx must be integer',
-                               BaseNode, small_branch.lp, small_branch.integerIndices, .5)
+                               BaseNode, self.small_branch_std.lp, self.small_branch_std.integerIndices, .5)
         self.assertRaisesRegex(AssertionError, 'ancestors must be a tuple',
-                               BaseNode, lp=small_branch.lp,
-                               integer_indices=small_branch.integerIndices,
+                               BaseNode, lp=self.small_branch_std.lp,
+                               integer_indices=self.small_branch_std.integerIndices,
                                ancestors=[0])
         self.assertRaisesRegex(AssertionError, 'idx cannot be an ancestor of itself',
-                               BaseNode, lp=small_branch.lp,
-                               integer_indices=small_branch.integerIndices,
+                               BaseNode, lp=self.small_branch_std.lp,
+                               integer_indices=self.small_branch_std.integerIndices,
                                idx=0, ancestors=(0,))
+
+        self.assertRaisesRegex(AssertionError, 'must have Ax >= b',
+                               BaseNode, lp=small_branch_max.lp,
+                               integer_indices=small_branch_max.integerIndices)
+        l = self.cut1_std.lp.variablesLower.copy()
+        l[0] = -10
+        self.cut1_std.lp.variablesLower = l
+        self.assertRaisesRegex(AssertionError, 'must have x >= 0 for all variables',
+                               BaseNode, lp=self.cut1_std.lp,
+                               integer_indices=self.cut1_std.integerIndices)
 
     def test_cut_pool_setter_fails_asserts(self):
         node = BaseNode(infeasible.lp, infeasible.integerIndices)
@@ -256,16 +266,16 @@ class TestBaseNode(TestModels):
                                total_number_gmic_removed=1, total_cut_generation_iterations=10)
         self.assertTrue(node.lp_feasible)
         self.assertFalse(node.cut_generation_stalled)
-        self.assertTrue(-2.01 < obj - node.objective_value < -2)
+        self.assertTrue(-2.01 < obj - node.objective_value < -1.99)
         self.assertTrue(node.lp.nConstraints > constrs)
         self.assertTrue(node.mip_feasible)
-        self.assertTrue(rtn['total_iterations_gmic_created'] == 3)
-        self.assertTrue(rtn['total_number_gmic_created'] == 5)
-        self.assertTrue(rtn['total_iterations_gmic_added'] == 3)
-        self.assertTrue(rtn['total_number_gmic_added'] == 5)
-        self.assertTrue(rtn['total_iterations_gmic_removed'] == 1)
-        self.assertTrue(rtn['total_number_gmic_removed'] == 1)
-        self.assertTrue(rtn['total_cut_generation_iterations'] == 12)
+        self.assertTrue(rtn['total_iterations_gmic_created'] == 4)
+        self.assertTrue(rtn['total_number_gmic_created'] == 7)
+        self.assertTrue(rtn['total_iterations_gmic_added'] == 4)
+        self.assertTrue(rtn['total_number_gmic_added'] == 7)
+        self.assertTrue(rtn['total_iterations_gmic_removed'] == 2)
+        self.assertTrue(rtn['total_number_gmic_removed'] == 3)
+        self.assertTrue(rtn['total_cut_generation_iterations'] == 13)
 
     def test_bound_lp_fails_asserts(self):
         node = self.make_multivariable_node()
@@ -283,7 +293,7 @@ class TestBaseNode(TestModels):
         self.assertFalse(node.unbounded)
 
     def test_bound_lp_fractional(self):
-        node = BaseNode(small_branch.lp, small_branch.integerIndices)
+        node = BaseNode(self.small_branch_std.lp, self.small_branch_std.integerIndices)
         node._bound_lp()
         self.assertTrue(node.objective_value == -2.75)
         self.assertTrue(all(node.solution == [0, 1.25, 1.5]))
@@ -310,8 +320,9 @@ class TestBaseNode(TestModels):
         self.assertTrue(node.unbounded)
 
     def test_cut_generation_iteration_fails_asserts(self):
-        node = BaseNode(negative.lp, negative.integerIndices)
+        node = BaseNode(self.small_branch_std.lp, self.small_branch_std.integerIndices)
         node._bound_lp()
+        node.solution = np.array([0, 0, -1])
         self.assertRaisesRegex(AssertionError, 'we must have x >= 0',
                                node._cut_generation_iteration)
 
@@ -347,7 +358,7 @@ class TestBaseNode(TestModels):
         constrs = node.lp.nConstraints
         node._cut_generation_iteration(gomory_cuts=True)
         self.assertFalse(node.cut_generation_stalled)
-        self.assertTrue(-1.6 > obj - node.objective_value > -1.61)
+        self.assertTrue(-1.5 > obj - node.objective_value > -1.6)
         self.assertTrue(node.lp.nConstraints > constrs)
 
     def test_remove_slack_cuts(self):
@@ -420,8 +431,12 @@ class TestBaseNode(TestModels):
         node._bound_lp()
         self.assertRaisesRegex(AssertionError, 'max_nonzero_coefs must be positive int',
                                node._select_cuts, max_nonzero_coefs=0)
+        self.assertRaisesRegex(AssertionError, 'min_cut_depth must be > 0',
+                               node._select_cuts, min_cut_depth=0)
         self.assertRaisesRegex(AssertionError, 'parallel_cut_tolerance must be number in \(0, 90\]',
                                node._select_cuts, parallel_cut_tolerance=100)
+        self.assertRaisesRegex(AssertionError, 'max_relative_cut_term_ratio must be positive',
+                               node._select_cuts, max_relative_cut_term_ratio=0)
 
     def test_select_cuts(self):
         cuts = {
@@ -430,7 +445,8 @@ class TestBaseNode(TestModels):
             'cut_3': (CyLPArray([0, -1, 0]), -1),  # keep
             'cut_4': (CyLPArray([0, 0, 0]), 0),  # pick off for all zero
             'cut_5': (CyLPArray([-99, 0, -101]), -110),  # option to pick off for too parallel
-            'cut_6': (CyLPArray([-1, 0, 0]), -2)  # pick off for not enough depth
+            'cut_6': (CyLPArray([-1, 0, 0]), -2),  # pick off for not enough depth
+            'cut_7': (CyLPArray([-10000, -10000, -10000]), -10000)  # pick off for too large coefs
         }
         correct_cuts = {'cut_1', 'cut_2', 'cut_3'}
         node = BaseNode(self.small_branch_std.lp, self.small_branch_std.integerIndices)
@@ -443,7 +459,7 @@ class TestBaseNode(TestModels):
             for idx in correct_cuts:
                 # check each cut was added - will fail if not
                 node.lp.removeConstraint(idx)
-            self.assertTrue(set(node.cut_pool.keys()) == {'cut_4', 'cut_5', 'cut_6'})
+            self.assertTrue(set(node.cut_pool.keys()) == {'cut_4', 'cut_5', 'cut_6', 'cut_7'})
             self.assertTrue(ugc.called)
             self.assertTrue(ugc.call_args.kwargs['operation'] == 'added')
             self.assertTrue(ugc.call_args.kwargs['cut_idxs'] == added_cuts)
@@ -529,8 +545,8 @@ class TestBaseNode(TestModels):
                                node._base_branch, branch_idx=1)
 
     def test_base_branch(self):
-        node = BaseNode(small_branch.lp, small_branch.integerIndices)
-        node.bound()
+        node = BaseNode(self.small_branch_std.lp, self.small_branch_std.integerIndices)
+        node.bound(gomory_cuts=False)
         idx = 2
         out = {next_node_idx: node._base_branch(2, next_node_idx) for
                next_node_idx in [None, 1]}
@@ -575,7 +591,7 @@ class TestBaseNode(TestModels):
                             rtn['next_node_idx'] is None)
 
     def test_strong_branch_fails_asserts(self):
-        node = BaseNode(small_branch.lp, small_branch.integerIndices, 0)
+        node = BaseNode(self.small_branch_std.lp, self.small_branch_std.integerIndices, 0)
         node.bound()
         idx = node._most_fractional_index
 
@@ -607,24 +623,24 @@ class TestBaseNode(TestModels):
             self.assertTrue(bb.called)
 
     def test_is_fractional_fails_asserts(self):
-        node = BaseNode(small_branch.lp, small_branch.integerIndices, 0)
+        node = BaseNode(self.small_branch_std.lp, self.small_branch_std.integerIndices, 0)
         self.assertRaisesRegex(AssertionError, 'value should be a number',
                                node._is_fractional, '5')
 
     def test_is_fractional(self):
-        node = BaseNode(small_branch.lp, small_branch.integerIndices, 0)
+        node = BaseNode(self.small_branch_std.lp, self.small_branch_std.integerIndices, 0)
         self.assertTrue(node._is_fractional(5.5))
         self.assertFalse(node._is_fractional(5))
         self.assertFalse(node._is_fractional(5.999999999999))
         self.assertFalse(node._is_fractional(5.000000000001))
 
     def test_get_fraction_fails_asserts(self):
-        node = BaseNode(small_branch.lp, small_branch.integerIndices, 0)
+        node = BaseNode(self.small_branch_std.lp, self.small_branch_std.integerIndices, 0)
         self.assertRaisesRegex(AssertionError, 'value should be a number',
                                node._get_fraction, '5.5')
 
     def test_get_fraction(self):
-        node = BaseNode(small_branch.lp, small_branch.integerIndices, 0)
+        node = BaseNode(self.small_branch_std.lp, self.small_branch_std.integerIndices, 0)
         self.assertTrue(.5 == node._get_fraction(5.5))
         
     def test_most_fractional_index(self):
@@ -633,12 +649,12 @@ class TestBaseNode(TestModels):
         self.assertFalse(node._most_fractional_index,
                          'int solution should have no fractional index')
 
-        node = BaseNode(small_branch.lp, small_branch.integerIndices, 0)
-        node.bound()
+        node = BaseNode(self.small_branch_std.lp, self.small_branch_std.integerIndices, 0)
+        node.bound(gomory_cuts=False)
         self.assertTrue(node._most_fractional_index == 2)
 
     def test_branch(self):
-        node = BaseNode(small_branch.lp, small_branch.integerIndices, 0)
+        node = BaseNode(self.small_branch_std.lp, self.small_branch_std.integerIndices, 0)
         node.bound()
 
         # check function calls
@@ -653,8 +669,8 @@ class TestBaseNode(TestModels):
             self.assertTrue(branch_rtn == bb_rtn)
 
     def test_lt(self):
-        node1 = BaseNode(small_branch.lp, small_branch.integerIndices, 0,  -float('inf'))
-        node2 = BaseNode(small_branch.lp, small_branch.integerIndices, 0, 0)
+        node1 = BaseNode(self.small_branch_std.lp, self.small_branch_std.integerIndices, 0,  -float('inf'))
+        node2 = BaseNode(self.small_branch_std.lp, self.small_branch_std.integerIndices, 0, 0)
 
         self.assertTrue(node1 < node2)
         self.assertFalse(node2 < node1)
@@ -668,31 +684,35 @@ class TestBaseNode(TestModels):
         self.assertTrue(q.get().dual_bound == 0)
 
     def test_eq(self):
-        node1 = BaseNode(small_branch.lp, small_branch.integerIndices, 0, -float('inf'))
-        node2 = BaseNode(small_branch.lp, small_branch.integerIndices, 0, 0)
-        node3 = BaseNode(small_branch.lp, small_branch.integerIndices, 0, 0)
+        node1 = BaseNode(self.small_branch_std.lp, self.small_branch_std.integerIndices, 0, -float('inf'))
+        node2 = BaseNode(self.small_branch_std.lp, self.small_branch_std.integerIndices, 0, 0)
+        node3 = BaseNode(self.small_branch_std.lp, self.small_branch_std.integerIndices, 0, 0)
 
         self.assertTrue(node3 == node2)
         self.assertFalse(node1 == node2)
         self.assertRaises(TypeError, node1.__eq__, 5)
 
     def test_sense_fails_asserts(self):
-        node = BaseNode(small_branch.lp, small_branch.integerIndices, 0)
-        node.lp.addConstraint(-CyLPArray([1, 0, 0]) * node.lp.getVarByName('x') >= 1)
+        node = BaseNode(self.small_branch_std.lp, self.small_branch_std.integerIndices, 0)
+        node.lp.addConstraint(CyLPArray([1, 0, 0]) * node.lp.getVarByName('x') <= 1)
         with self.assertRaises(AssertionError):
             node._sense
 
     def test_sense(self):
-        node = BaseNode(small_branch.lp, small_branch.integerIndices, 0)
-        self.assertTrue(node._sense == '<=')
-        milp = MILPInstance(A=small_branch.A, b=small_branch.b, c=small_branch.c,
-                            sense=['Min', '>='], numVars=3,
-                            integerIndices=small_branch.integerIndices)
-        node = BaseNode(milp.lp, milp.integerIndices, 0)
+        node = BaseNode(self.small_branch_std.lp, self.small_branch_std.integerIndices, 0)
         self.assertTrue(node._sense == '>=')
 
+        x = node.lp.getVarByName('x')
+        A = -node.lp.constraints[0].varCoefs[x]
+        b = -node.lp.constraints[0].lower
+        for constr in node.lp.constraints:
+            node.lp.removeConstraint(constr.name)
+
+        node.lp.addConstraint(A * x <= b)
+        self.assertTrue(node._sense == '<=')
+
     def test_variables_nonnegative(self):
-        node = BaseNode(small_branch.lp, small_branch.integerIndices, 0)
+        node = BaseNode(self.small_branch_std.lp, self.small_branch_std.integerIndices, 0)
         self.assertTrue(node._variables_nonnegative)
         node = BaseNode(cut2.lp, cut2.integerIndices, 0)
         l = node.lp.variablesLower.copy()
@@ -701,7 +721,7 @@ class TestBaseNode(TestModels):
         self.assertFalse(node._variables_nonnegative)
 
     def test_x_only_variable(self):
-        node = BaseNode(small_branch.lp, small_branch.integerIndices, 0)
+        node = BaseNode(self.small_branch_std.lp, self.small_branch_std.integerIndices, 0)
         self.assertTrue(node._x_only_variable)
         node = self.make_multivariable_node()
         self.assertFalse(node._x_only_variable)
