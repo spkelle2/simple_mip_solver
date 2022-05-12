@@ -352,9 +352,8 @@ class BaseNode:
                     break
             if not parallel_cut:
                 # uncomment to check if cut is valid
-                # check_cut_against_grid(lp=self.lp, pi=pi, pi0=pi0, max_val=10)
-                # check_cut(sol=[0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0],
-                #           lp=self.lp, pi=pi, pi0=pi0)
+                # check_cut_against_grid(lp=self.lp, pi=pi, pi0=pi0, max_val=20)
+                # check_cut(sol=[0, 0, 3, 0], lp=self.lp, pi=pi, pi0=pi0)
                 cut = pi * self.lp.getVarByName('x') >= pi0
                 self.lp.addConstraint(cut, idx)
                 added_cuts[idx] = (pi, pi0)
