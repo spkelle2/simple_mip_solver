@@ -100,6 +100,8 @@ class BaseNode:
         self.gmic_name_pattern = re.compile('^cut_gomory_')
         self._cut_pool = {}
         self.max_term = np.max(np.abs(self.lp.constraints[0].varCoefs[self.lp.getVarByName('x')]))
+        self.children = None
+        self.cut_generation_dual_bound = {}
 
         # check formatting
         assert self._sense == '>=', 'must have Ax >= b'
@@ -132,7 +134,9 @@ class BaseNode:
                     total_cut_generation_iterations: int = 0, total_iterations_gmic_created: int = 0,
                     total_number_gmic_created: int = 0, total_iterations_gmic_added: int = 0,
                     total_number_gmic_added: int = 0, total_iterations_gmic_removed: int = 0,
-                    total_number_gmic_removed: int = 0, **kwargs) -> Dict[str, Any]:
+                    total_number_gmic_removed: int = 0,
+                    cut_generation_dual_bound_dict: Dict[int, Dict[int, float]] = None,
+                    **kwargs) -> Dict[str, Any]:
         """bound subroutine to be shared by all superclasses. Bounds the LP
         relaxation then calls the cut generation subroutine
 
@@ -154,9 +158,14 @@ class BaseNode:
         from the underlying LP relaxation
         :param total_number_gmic_removed: Running total of GMICs removed from the
         underlying LP relaxation across all branch and bound subproblems
+        :param cut_generation_dual_bound_dict: Dictionary keyed by node index tracking
+        each's dual bound after every cut generation iteration (iteration 0 is the
+        bound after branching on the parent)
         :param kwargs: dictionary of arguments to pass on to selected subroutines
         :return: Dictionary of updated running totals for GMIC operations
         """
+        cut_generation_dual_bound_dict = cut_generation_dual_bound_dict or {}
+
         assert isinstance(max_cut_generation_iterations, int) and max_cut_generation_iterations > 0, \
             'max_cut_generation_iterations must be a positive integer'
         assert isinstance(total_cut_generation_iterations, int) and total_cut_generation_iterations >= 0, \
@@ -173,12 +182,15 @@ class BaseNode:
             "total_iterations_gmic_removed is nonnegative integer"
         assert isinstance(total_number_gmic_removed, int) and total_number_gmic_removed >= 0, \
             "total_number_gmic_removed is nonnegative integer"
+        if cut_generation_dual_bound_dict:
+            good, msg = self._good_cut_generation_dual_bound_dict(cut_generation_dual_bound_dict)
+            assert good, msg
 
         self._bound_lp()
         while self.lp_feasible and not self.mip_feasible and not self.cut_generation_stalled and \
                 self.cut_generation_iterations < max_cut_generation_iterations:
             self._cut_generation_iteration(**kwargs)
-        return {
+        rtn = {
             'total_cut_generation_iterations': total_cut_generation_iterations + self.cut_generation_iterations,
             'total_iterations_gmic_created': total_iterations_gmic_created + self.iterations_gmic_created,
             'total_number_gmic_created': total_number_gmic_created + self.number_gmic_created,
@@ -187,6 +199,30 @@ class BaseNode:
             'total_iterations_gmic_removed': total_iterations_gmic_removed + self.iterations_gmic_removed,
             'total_number_gmic_removed': total_number_gmic_removed + self.number_gmic_removed
         }
+        if self.idx is not None:
+            cut_generation_dual_bound_dict[self.idx] = self.cut_generation_dual_bound
+            rtn['cut_generation_dual_bound_dict'] = cut_generation_dual_bound_dict
+        return rtn
+
+    def _good_cut_generation_dual_bound_dict(self, d: Dict[int, Dict[int, float]]) -> \
+            Tuple[bool, Union[str, None]]:
+        if not isinstance(d, dict):
+            return False, f'cut_generation_dual_bound_dict should be a dictionary'
+        for idx, dual_bound_dict in d.items():
+            if not isinstance(idx, int):
+                return False, f'index {idx} should be integer'
+            if idx == self.idx:
+                return False, f'index {idx} has already been processed'
+            if not isinstance(dual_bound_dict, dict):
+                return False, f'index {idx} should have dictionary value'
+            for cut_idx, dual_bound in dual_bound_dict.items():
+                if not isinstance(cut_idx, int):
+                    return False, f'cut index {cut_idx} for node {idx} should be integer'
+                if not isinstance(dual_bound, (int, float)):
+                    return False, f'dual bound for node {idx} cut index {cut_idx} should be a number'
+            if set(dual_bound_dict.keys()) != set(range(max(dual_bound_dict.keys()) + 1)):
+                return False, f'index {idx} should have dictionary keyed by range of ints'
+        return True, None
 
     def _bound_lp(self: T) -> None:
         """Solve the current node with simplex to generate a bound on objective
@@ -208,15 +244,23 @@ class BaseNode:
         int_var_vals = None if not self.lp_feasible else self.solution[self._integer_indices]
         self.mip_feasible = self.lp_feasible and \
             np.max(np.abs(np.round(int_var_vals) - int_var_vals)) <= variable_epsilon
+        self.cut_generation_dual_bound[self.cut_generation_iterations] = self.objective_value
 
-    def _cut_generation_iteration(self: T, **kwargs: Any) -> None:
+    def _cut_generation_iteration(self: T, cutting_plane_progress_tolerance:
+                                  float = cutting_plane_progress_tolerance,
+                                  **kwargs: Any) -> None:
         """ Generate cuts to refine the current LP relaxation.
 
-        :param max_cut_generation_iterations: number of rounds of cut generation to perform
+        :param cutting_plane_progress_tolerance: relative improvement in objective
+        compared to the last iteration which must be exceeded for a subsequent cut
+        generation iteration to be allowed
         :param kwargs: dictionary of arguments to pass on to selected subroutines
         :return: dictionary of cuts that can be added to other instances
         """
         assert all(self.solution > -variable_epsilon), 'we must have x >= 0'
+        assert isinstance(cutting_plane_progress_tolerance, float) \
+            and cutting_plane_progress_tolerance > 0, \
+            'cutting_plane_progress_tolerance must be positive'
 
         # bring up anything close to 0 to avoid numerical errors
         self.solution = np.maximum(self.solution, 0)
@@ -281,7 +325,6 @@ class BaseNode:
         assert isinstance(gomory_cuts, bool), 'gomory_cuts is boolean'
 
         cut_pool = {}
-
         if gomory_cuts:
             for row_idx, (pi, pi0) in self._find_gomory_cuts().items():
                 idx = f'cut_gomory_{self.idx}_{self.cut_generation_iterations}_{row_idx}'
@@ -352,8 +395,8 @@ class BaseNode:
                     break
             if not parallel_cut:
                 # uncomment to check if cut is valid
-                # check_cut_against_grid(lp=self.lp, pi=pi, pi0=pi0, max_val=20)
-                # check_cut(sol=[0, 0, 3, 0], lp=self.lp, pi=pi, pi0=pi0)
+                # check_cut_against_grid(lp=self.lp, pi=pi, pi0=pi0, max_val=5)
+                # check_cut(sol=[0, 0, 0, 0], lp=self.lp, pi=pi, pi0=pi0)
                 cut = pi * self.lp.getVarByName('x') >= pi0
                 self.lp.addConstraint(cut, idx)
                 added_cuts[idx] = (pi, pi0)
@@ -504,6 +547,8 @@ class BaseNode:
                 )
             lp.objective = self.lp.objective.copy()
             lp.setBasisStatus(*basis)  # warm start
+
+        self.children = (next_node_idx, next_node_idx + 1) if next_node_idx is not None else None
 
         # return instances of the subclass that calls this function
         return {

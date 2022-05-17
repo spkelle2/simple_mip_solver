@@ -20,7 +20,7 @@ from test_simple_mip_solver.example_models import no_branch, small_branch, infea
 from test_simple_mip_solver import example_models
 
 
-skip_longs = True
+skip_longs = False
 
 
 class TestBranchAndBoundTree(unittest.TestCase):
@@ -92,6 +92,32 @@ class TestBranchAndBoundTree(unittest.TestCase):
         node1 = bb.tree.get_node_instances(1)
         self.assertTrue(node1.idx == 1, 'we should get node with matching id')
         self.assertTrue(isinstance(node1, BaseNode), 'we should get a node')
+
+    def test_subtree_dual_bound_fails_asserts(self):
+        bb = BranchAndBound(self.small_branch_std, gomory_cuts=False)
+        self.assertRaisesRegex(AssertionError, 'subtree_root_id must belong to the tree',
+                               bb.tree.subtree_dual_bound, subtree_root_id=1)
+
+    def test_subtree_dual_bound(self):
+        bb = BranchAndBound(small_branch_copy, gomory_cuts=False, node_limit=1)
+
+        # 0 nodes
+        self.assertTrue(bb.tree.subtree_dual_bound(0) == -float('inf'))
+
+        # 1 node
+        bb.solve()
+        self.assertTrue(bb.tree.subtree_dual_bound(0) == -2.75)
+
+        # 2 nodes
+        bb.node_limit = 2
+        bb.solve()
+        self.assertTrue(bb.tree.subtree_dual_bound(0) == -2.75)
+
+        # all nodes
+        bb.node_limit = float('inf')
+        bb.solve()
+        self.assertTrue(bb.tree.subtree_dual_bound(0) == -2)
+        self.assertTrue(bb.tree.subtree_dual_bound(2) == float('inf'))
 
 
 class TestBranchAndBound(unittest.TestCase):
@@ -420,29 +446,29 @@ class TestBranchAndBound(unittest.TestCase):
                 self.assertTrue((node.cut_pool['node_0_cglp_cut'][0] == pi).all())
                 self.assertTrue((node.cut_pool['node_0_cglp_cut'][1] == pi0).all())
 
-    def test_find_dual_bound_fails_asserts(self):
+    def test_find_parameterized_dual_bound_fails_asserts(self):
         bb = BranchAndBound(self.small_branch_std, gomory_cuts=False)
         self.assertRaisesRegex(AssertionError, 'must solve this instance before',
-                               bb.find_dual_bound, CyLPArray([2.5, 4.5]))
+                               bb.find_parameterized_dual_bound, CyLPArray([2.5, 4.5]))
         bb.solve()
         self.assertRaisesRegex(AssertionError, 'only works with CyLP arrays',
-                               bb.find_dual_bound, np.array([2.5, 4.5]))
+                               bb.find_parameterized_dual_bound, np.array([2.5, 4.5]))
         self.assertRaisesRegex(AssertionError, 'shape of the RHS being added should match',
-                               bb.find_dual_bound, CyLPArray([4.5]))
+                               bb.find_parameterized_dual_bound, CyLPArray([4.5]))
 
         bb = BranchAndBound(infeasible2)
         bb.root_node.lp += np.matrix([[0, -1, -1]]) * bb.root_node.lp.getVarByName('x') >= CyLPArray([-2.5])
         bb.solve()
         self.assertRaisesRegex(AssertionError, 'feature expects the root node to have a single constraint object',
-                               bb.find_dual_bound, CyLPArray([2.5, 4.5]))
+                               bb.find_parameterized_dual_bound, CyLPArray([2.5, 4.5]))
 
-    def test_find_dual_bound(self):
+    def test_find_parameterized_dual_bound(self):
 
-        # Ensure that BranchAndBound.find_dual_bound generates the dual function
+        # Ensure that BranchAndBound.find_parameterized_dual_bound generates the dual function
         # that we saw in ISE 418 HW 3 problem 1
         bb = BranchAndBound(h3p1, gomory_cuts=False)
         bb.solve()
-        bound = bb.find_dual_bound(CyLPArray([3.5, -3.5]))
+        bound = bb.find_parameterized_dual_bound(CyLPArray([3.5, -3.5]))
         self.assertTrue(bb.objective_value == bound, 'dual should be strong at original rhs')
 
         prob = {0: h3p1_0, 1: h3p1_1, 2: h3p1_2, 3: h3p1_3, 4: h3p1_4, 5: h3p1_5}
@@ -451,7 +477,7 @@ class TestBranchAndBound(unittest.TestCase):
         for beta in range(6):
             new_bb = BranchAndBound(prob[beta])
             new_bb.solve()
-            bound = bb.find_dual_bound(CyLPArray(np.array([beta, -beta])))
+            bound = bb.find_parameterized_dual_bound(CyLPArray(np.array([beta, -beta])))
             self.assertTrue(isclose(sol_new[beta], new_bb.objective_value, abs_tol=.01),
                             'new branch and bound objective should match expected')
             self.assertTrue(isclose(sol_bound[beta], bound),
@@ -461,7 +487,7 @@ class TestBranchAndBound(unittest.TestCase):
 
         bb = BranchAndBound(self.small_branch_std, gomory_cuts=False)
         bb.solve()
-        bound = bb.find_dual_bound(CyLPArray([-2.5, -4.5]))
+        bound = bb.find_parameterized_dual_bound(CyLPArray([-2.5, -4.5]))
 
         # just make sure the dual bound works here too
         self.assertTrue(bound <= -5.99,
@@ -470,21 +496,21 @@ class TestBranchAndBound(unittest.TestCase):
         # check function calls
         bb = BranchAndBound(self.small_branch_std, gomory_cuts=False)
         bb.solve()
-        bound_duals = [bb._bound_dual(n.lp) for n in bb.tree.get_node_instances([6, 12, 10, 8, 2])]
-        with patch.object(bb, '_bound_dual') as bd:
-            bd.side_effect = bound_duals
-            bound = bb.find_dual_bound(CyLPArray([3, 3]))
+        bound_parameterized_duals = [bb._bound_parameterized_dual(n.lp) for n in bb.tree.get_node_instances([6, 12, 10, 8, 2])]
+        with patch.object(bb, '_bound_parameterized_dual') as bd:
+            bd.side_effect = bound_parameterized_duals
+            bound = bb.find_parameterized_dual_bound(CyLPArray([3, 3]))
             self.assertTrue(bd.call_count == 5)
 
         bb = BranchAndBound(self.small_branch_std, gomory_cuts=False)
         bb.solve()
-        bound = bb.find_dual_bound(CyLPArray([3, 3]))
-        with patch.object(bb, '_bound_dual') as bd:
-            bound = bb.find_dual_bound(CyLPArray([1, 1]))
+        bound = bb.find_parameterized_dual_bound(CyLPArray([3, 3]))
+        with patch.object(bb, '_bound_parameterized_dual') as bd:
+            bound = bb.find_parameterized_dual_bound(CyLPArray([1, 1]))
             self.assertFalse(bd.called)
 
     @unittest.skipIf(skip_longs, "debugging")
-    def test_find_dual_bound_many_times(self):
+    def test_find_parameterized_dual_bound_many_times(self):
         pattern = re.compile('evaluation_(\d+).mps')
         fldr_pth = os.path.join(os.path.dirname(os.path.abspath(inspect.getfile(example_models))),
                                 'example_value_functions')
@@ -502,17 +528,17 @@ class TestBranchAndBound(unittest.TestCase):
             instance_0 = evals[0]
             for bb in evals.values():
                 # all problems were given as <=, so their constraints were flipped by default
-                self.assertTrue(instance_0.find_dual_bound(CyLPArray(-bb.model.b)) <=
+                self.assertTrue(instance_0.find_parameterized_dual_bound(CyLPArray(-bb.model.b)) <=
                                 bb.objective_value + .01, 'dual_bound should be less')
 
-    def test_bound_dual(self):
+    def test_bound_parameterized_dual(self):
         bb = BranchAndBound(infeasible2)
         bb.root_node.lp += np.matrix([[0, -1, -1]]) * bb.root_node.lp.getVarByName('x') >= CyLPArray([-2.5])
         bb.solve()
         terminal_nodes = bb.tree.get_leaves(0)
         infeasible_nodes = [n for n in terminal_nodes if n.lp_feasible is False]
         n = infeasible_nodes[0]
-        lp = bb._bound_dual(n.lp)
+        lp = bb._bound_parameterized_dual(n.lp)
 
         # test that we get a CyClpSimplex object back
         self.assertTrue(isinstance(lp, CyClpSimplex), 'should return CyClpSimplex instance')
@@ -552,7 +578,7 @@ class TestBranchAndBound(unittest.TestCase):
         # problem is now feasible
         self.assertTrue(lp.getStatusCode() == 0, 'lp should now be optimal')
 
-    def test_bound_dual_fails_asserts(self):
+    def test_bound_parameterized_dual_fails_asserts(self):
         bb = BranchAndBound(self.infeasible_std)
         bb.solve()
         terminal_nodes = bb.tree.get_leaves(0)
@@ -560,9 +586,9 @@ class TestBranchAndBound(unittest.TestCase):
         n = infeasible_nodes[0]
         n.lp.addVariable('s_0', 1)
         self.assertRaisesRegex(AssertionError, "variable 's_0' is a reserved name",
-                               bb._bound_dual, n.lp)
+                               bb._bound_parameterized_dual, n.lp)
         self.assertRaisesRegex(AssertionError, "must give CyClpSimplex instance",
-                               bb._bound_dual, n)
+                               bb._bound_parameterized_dual, n)
 
 
 if __name__ == '__main__':

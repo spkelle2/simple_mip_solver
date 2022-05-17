@@ -64,6 +64,9 @@ class TestBaseNode(TestModels):
         self.assertFalse(node.number_gmic_removed)
         self.assertTrue(isinstance(node.gmic_name_pattern, re.Pattern))
         self.assertFalse(node.cut_pool)
+        self.assertTrue(isinstance(node.max_term, CyLPArray) and not node.max_term.shape)
+        self.assertFalse(node.children)
+        self.assertFalse(node.cut_generation_dual_bound)
 
     def test_init_lineage(self):
         node = BaseNode(self.small_branch_std.lp, self.small_branch_std.integerIndices, idx=0)
@@ -161,6 +164,8 @@ class TestBaseNode(TestModels):
                                node._base_bound, total_iterations_gmic_removed=-1)
         self.assertRaisesRegex(AssertionError, 'is nonnegative integer',
                                node._base_bound, total_number_gmic_removed=-1)
+        self.assertRaisesRegex(AssertionError, 'should be a dictionary',
+                               node._base_bound, cut_generation_dual_bound_dict='fish')
 
     def test_base_bound(self):
         node = BaseNode(infeasible.lp, infeasible.integerIndices)
@@ -172,7 +177,10 @@ class TestBaseNode(TestModels):
         # check function calls
         # infeasible lp
         with patch.object(node, '_bound_lp') as bl, \
-                patch.object(node, '_cut_generation_iteration', new=patch_cgi_failed_iter) as cgi:
+                patch.object(node, '_cut_generation_iteration', new=patch_cgi_failed_iter) as cgi, \
+                patch.object(node, '_good_cut_generation_dual_bound_dict') as gcgdbd:
+
+            gcgdbd.return_value = (True, None)
 
             # initially infeasible
             node.lp_feasible = False
@@ -180,14 +188,17 @@ class TestBaseNode(TestModels):
 
             node._base_bound()
 
+            self.assertFalse(gcgdbd.called)
             self.assertTrue(bl.called)
             self.assertFalse(node.cut_generation_iterations)  # would be 1 if mock called
 
             # infeasible after a cut generation iteration
             node.lp_feasible = True
             max_iters = 3
-            node._base_bound(max_cut_generation_iterations=max_iters)
+            node._base_bound(max_cut_generation_iterations=max_iters,
+                             cut_generation_dual_bound_dict={5: {0: 1.25}})
             # should get called once and then stopped
+            self.assertTrue(gcgdbd.called)
             self.assertTrue(bl.call_count == 2)
             self.assertFalse(node.lp_feasible)
             self.assertFalse(node.mip_feasible)
@@ -250,13 +261,14 @@ class TestBaseNode(TestModels):
                 patch.object(node, '_cut_generation_iteration') as cgi:
             node.mip_feasible = True
 
-            node._base_bound(max_cut_generation_iterations=max_cut_generation_iterations)
+            rtn = node._base_bound(max_cut_generation_iterations=max_cut_generation_iterations)
 
             self.assertTrue(bl.called)
             self.assertFalse(cgi.called)
+            self.assertFalse('cut_generation_dual_bound_dict' in rtn)  # shouldn't return if no idx given
 
         # do normal run to make sure we're ok
-        node = BaseNode(self.cut2_std.lp, self.cut2_std.integerIndices)
+        node = BaseNode(self.cut2_std.lp, self.cut2_std.integerIndices, idx=0)
         node._bound_lp()
         obj = node.objective_value
         constrs = node.lp.nConstraints
@@ -276,6 +288,50 @@ class TestBaseNode(TestModels):
         self.assertTrue(rtn['total_iterations_gmic_removed'] == 2)
         self.assertTrue(rtn['total_number_gmic_removed'] == 3)
         self.assertTrue(rtn['total_cut_generation_iterations'] == 13)
+        # dual bound progress
+        db = rtn.get('cut_generation_dual_bound_dict')
+        self.assertTrue(set(db.keys()) == {0}, 'if no dual bound dict passed to _base_bound, '
+                        'only the current index should be returned in it')
+        self.assertTrue(set(db[0].keys()) == set(range(max(db[0].keys()) + 1)))
+        for itr, cgi_obj in db[0].items():
+            if itr != node.cut_generation_iterations:
+                self.assertTrue(cgi_obj < db[0][itr + 1])
+                self.assertTrue(-2.01 < obj - cgi_obj <= 0)
+
+    def test_good_cut_generation_dual_bound_dict(self):
+        node = BaseNode(self.small_branch_std.lp, self.small_branch_std.integerIndices, idx=1)
+
+        good, msg = node._good_cut_generation_dual_bound_dict('fish')
+        self.assertFalse(good)
+        self.assertTrue(msg == 'cut_generation_dual_bound_dict should be a dictionary')
+
+        good, msg = node._good_cut_generation_dual_bound_dict({'fish': 5})
+        self.assertFalse(good)
+        self.assertTrue(msg == 'index fish should be integer')
+
+        good, msg = node._good_cut_generation_dual_bound_dict({1: 5})
+        self.assertFalse(good)
+        self.assertTrue(msg == 'index 1 has already been processed')
+
+        good, msg = node._good_cut_generation_dual_bound_dict({0: 5})
+        self.assertFalse(good)
+        self.assertTrue(msg == 'index 0 should have dictionary value')
+
+        good, msg = node._good_cut_generation_dual_bound_dict({0: {'fish': 5}})
+        self.assertFalse(good)
+        self.assertTrue(msg == 'cut index fish for node 0 should be integer')
+
+        good, msg = node._good_cut_generation_dual_bound_dict({0: {0: 'fish'}})
+        self.assertFalse(good)
+        self.assertTrue(msg == 'dual bound for node 0 cut index 0 should be a number')
+
+        good, msg = node._good_cut_generation_dual_bound_dict({0: {1: -5}})
+        self.assertFalse(good)
+        self.assertTrue(msg == 'index 0 should have dictionary keyed by range of ints')
+
+        good, msg = node._good_cut_generation_dual_bound_dict({0: {0: -5}})
+        self.assertTrue(good)
+        self.assertFalse(msg)
 
     def test_bound_lp_fails_asserts(self):
         node = self.make_multivariable_node()
@@ -291,6 +347,7 @@ class TestBaseNode(TestModels):
         self.assertTrue(node.lp_feasible)
         self.assertTrue(node.mip_feasible)
         self.assertFalse(node.unbounded)
+        self.assertTrue(node.cut_generation_dual_bound == {0: -2})
 
     def test_bound_lp_fractional(self):
         node = BaseNode(self.small_branch_std.lp, self.small_branch_std.integerIndices)
@@ -301,6 +358,7 @@ class TestBaseNode(TestModels):
         self.assertTrue(node.lp_feasible)
         self.assertFalse(node.mip_feasible)
         self.assertFalse(node.unbounded)
+        self.assertTrue(node.cut_generation_dual_bound == {0: -2.75})
 
     def test_bound_lp_infeasible(self):
         node = BaseNode(infeasible.lp, infeasible.integerIndices)
@@ -311,6 +369,7 @@ class TestBaseNode(TestModels):
         self.assertFalse(node.unbounded)
         self.assertTrue(node.solution is None)
         self.assertTrue(node.objective_value == float('inf'))
+        self.assertTrue(node.cut_generation_dual_bound == {0: float('inf')})
 
     def test_bound_lp_unbounded(self):
         node = BaseNode(unbounded.lp, unbounded.integerIndices)
@@ -318,10 +377,13 @@ class TestBaseNode(TestModels):
 
         self.assertTrue(node.lp_feasible)
         self.assertTrue(node.unbounded)
+        self.assertTrue(node.cut_generation_dual_bound == {0: -62500000000000.0})
 
     def test_cut_generation_iteration_fails_asserts(self):
         node = BaseNode(self.small_branch_std.lp, self.small_branch_std.integerIndices)
         node._bound_lp()
+        self.assertRaisesRegex(AssertionError, 'must be positive',
+                               node._cut_generation_iteration, cutting_plane_progress_tolerance=0)
         node.solution = np.array([0, 0, -1])
         self.assertRaisesRegex(AssertionError, 'we must have x >= 0',
                                node._cut_generation_iteration)
@@ -589,6 +651,14 @@ class TestBaseNode(TestModels):
             # check other returns
             self.assertTrue(rtn['next_node_idx'] == 3 if next_node_idx else
                             rtn['next_node_idx'] is None)
+
+    def test_base_branch_children(self):
+        node = BaseNode(self.small_branch_std.lp, self.small_branch_std.integerIndices)
+        node.bound(gomory_cuts=False)
+        node._base_branch(2, None)
+        self.assertFalse(node.children)
+        node._base_branch(2, 1)
+        self.assertTrue(node.children == (1, 2))
 
     def test_strong_branch_fails_asserts(self):
         node = BaseNode(self.small_branch_std.lp, self.small_branch_std.integerIndices, 0)
