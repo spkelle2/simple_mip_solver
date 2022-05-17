@@ -33,7 +33,7 @@ class BranchAndBoundTree(BinaryTree):
         """ Return the disjunction encoded in the terminal leaves of the branch
         and bound subtree rooted at node with id <subtree_root_id>
 
-        :param subtree_root_id: subtree_root_id: The id of the node that roots our subtree
+        :param subtree_root_id: The id of the node that roots our subtree
         :return: a list of pairs of arrays, (lb, ub). For x to be a feasible solution,
         there must be a (lb, ub) pair in the list such that lb <= x <= ub
         """
@@ -59,6 +59,18 @@ class BranchAndBoundTree(BinaryTree):
         assert all(instance is not None for instance in instances), \
             'each vertex in the branch and bound tree must have an attribute for a node instance'
         return instances if not is_int else instances[0]
+
+    def subtree_dual_bound(self: BT, subtree_root_id: int) -> Union[float, int]:
+        """ Return the dual bound for the branch and bound subtree rooted at node
+        <subtree_root_id>
+
+        :param subtree_root_id: The id of the node that roots our subtree
+        :return: The best possible objective value that can be attained in the
+        branch and bound tree rooted at <subtree_root_id>
+        """
+        assert subtree_root_id in self, 'subtree_root_id must belong to the tree'
+        return min(n.objective_value if n.objective_value is not None else n.dual_bound
+                   for n in self.get_leaves(subtree_root_id))
 
 
 class BranchAndBound(BaseAlgorithm):
@@ -215,8 +227,7 @@ class BranchAndBound(BaseAlgorithm):
                 else:
                     self._process_branch_rtn(node.idx, node.branch(**self._kwargs))
 
-        self.dual_bound = min([n.dual_bound for n in self._node_queue.queue] +
-                              [self.primal_bound])
+        self.dual_bound = self.tree.subtree_dual_bound(self.root_node.idx)
 
     def _process_branch_rtn(self: B, parent_id: int, rtn: Dict[str, Any]):
         """ Pull the nodes returned from branching out of the rtn dict and into
@@ -264,7 +275,7 @@ class BranchAndBound(BaseAlgorithm):
     # entrust the user to better know what they're doing using this function with cuts added
     # enforce above that branching is done by bounding variables and not adding constraints
     # i don't even think we need that enforcement because it would be cpatured in a constraint
-    def find_dual_bound(self, b: CyLPArray) -> float:
+    def find_parameterized_dual_bound(self, b: CyLPArray) -> float:
         """ Calculates a lower bound on the optimal objective value of the current
         MIP at a new RHS b by evaluating the dual function (BB.D from ISE 418 Lecture 8
         Slide 29) at b. Assumes the underlying LP relaxations all have a single
@@ -292,7 +303,7 @@ class BranchAndBound(BaseAlgorithm):
         # also does not update other attributes of the node to reflect its values from solve
         infeasible_nodes = [n for n in terminal_nodes if n.lp.getStatusCode() == 1]
         for n in infeasible_nodes:
-            n.lp = self._bound_dual(n.lp)
+            n.lp = self._bound_parameterized_dual(n.lp)
 
         assert all(n.lp.getStatusCode() in [-1, 0] for n in terminal_nodes)
 
@@ -309,7 +320,7 @@ class BranchAndBound(BaseAlgorithm):
             )
         return min(bounds.values())
 
-    def _bound_dual(self, cur_lp: CyClpSimplex) -> CyClpSimplex:
+    def _bound_parameterized_dual(self, cur_lp: CyClpSimplex) -> CyClpSimplex:
         """ Place a bound on each index of the dual variable associated with the
         constraints of this node's LP relaxation and resolve. We do this by adding
         to each constraint i the slack variable 's_i' in the node's LP relaxation,
