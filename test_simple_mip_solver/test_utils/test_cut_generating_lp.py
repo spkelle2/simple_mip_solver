@@ -145,6 +145,82 @@ class TestCutGeneratingLP(unittest.TestCase):
         self.assertTrue((lp.constraints[4].varCoefs[v_5] == 1).toarray().all())
         self.assertTrue((lp.constraints[4].varCoefs[v_11] == 1).toarray().all())
 
+    def test_create_cglp_depth_1(self):
+        inf = self.small_branch_std.lp.getCoinInfinity()
+        bb = BranchAndBound(self.small_branch_std, gomory_cuts=False)
+        bb.solve()
+        cglp = CutGeneratingLP(bb, root_id=1, depth=1)
+        lp = cglp._create_cglp()
+        dn = {n.idx: n for n in bb.tree.get_leaves(subtree_root_id=1, depth=1, keep='feasible')}
+
+        pi = lp.getVarByName('pi')
+        pi0 = lp.getVarByName('pi0')
+        u_3 = lp.getVarByName('u_3')
+        w_3 = lp.getVarByName('w_3')
+        v_3 = lp.getVarByName('v_3')
+        u_4 = lp.getVarByName('u_4')
+        w_4 = lp.getVarByName('w_4')
+        v_4 = lp.getVarByName('v_4')
+
+        # check variables are what we expect
+        self.assertTrue(len(lp.variables) == 8)
+        for v in [pi, pi0, u_3, w_3, v_3, u_4, w_4, v_4]:
+            if v.name in ['pi', 'pi0']:
+                assert_allclose(v.lower / -inf, 1)
+            else:
+                self.assertTrue((v.lower == 0).all())
+            if v.name == 'v_3':
+                assert_allclose(v.upper / inf, np.array([1, 0, 1]))
+            elif v.name == 'v_4':
+                assert_allclose(v.upper / inf, np.array([0, 0, 1]))
+            else:
+                assert_allclose(v.upper / inf, 1)
+
+        # check objective is what we expect
+        obj = np.concatenate((bb.tree.nodes[1].attr['node'].solution, [-1],
+                              np.zeros(16)), axis=None)
+        self.assertTrue((obj == lp.objective).all())
+
+        # check each constraint is what we expect (in simple case)
+        self.assertTrue(len(lp.constraints) == 5)
+
+        # pi >= A^T u_3 + I w_3 - I v_3
+        self.assertTrue(len(lp.constraints[0].varCoefs) == 4)
+        self.assertTrue((lp.constraints[0].varCoefs[pi] == -np.eye(3)).all())
+        self.assertTrue((lp.constraints[0].varCoefs[u_3] == dn[3].lp.coefMatrix.T).toarray().all())
+        self.assertTrue((lp.constraints[0].varCoefs[w_3] == np.eye(3)).all())
+        self.assertTrue((lp.constraints[0].varCoefs[v_3] == -np.eye(3)).all())
+
+        # pi0 <= b^T u_3 + lb^T w_3 - ub^T v_3
+        self.assertTrue(len(lp.constraints[1].varCoefs) == 4)
+        self.assertTrue((lp.constraints[1].varCoefs[pi0] == -1).toarray().all())
+        self.assertTrue((lp.constraints[1].varCoefs[u_3] == np.array([-1.5, -1.25])).all())
+        self.assertTrue((lp.constraints[1].varCoefs[w_3] == np.zeros(3)).all())
+        self.assertTrue((lp.constraints[1].varCoefs[v_3] == np.array([0, 0, -1])).all())
+
+        # pi >= A^T u_4 + I w_4 - I v_4
+        self.assertTrue(len(lp.constraints[2].varCoefs) == 4)
+        self.assertTrue((lp.constraints[2].varCoefs[pi] == -np.eye(3)).all())
+        self.assertTrue((lp.constraints[2].varCoefs[u_4] == dn[4].lp.coefMatrix.T).toarray().all())
+        self.assertTrue((lp.constraints[2].varCoefs[w_4] == np.eye(3)).all())
+        self.assertTrue((lp.constraints[2].varCoefs[v_4] == -np.eye(3)).all())
+
+        # pi0 <= b^T u_4 + lb^T w_4 - ub^T v_4
+        self.assertTrue(len(lp.constraints[3].varCoefs) == 4)
+        self.assertTrue((lp.constraints[3].varCoefs[pi0] == -1).toarray().all())
+        self.assertTrue((lp.constraints[3].varCoefs[u_4] == np.array([-1.5, -1.25])).all())
+        self.assertTrue((lp.constraints[3].varCoefs[w_4] == np.array([1, 0, 0])).all())
+        self.assertTrue((lp.constraints[3].varCoefs[v_4] == np.array([0, 0, -1])).all())
+
+        self.assertTrue(len(lp.constraints[4].varCoefs) == 6)
+        self.assertTrue((lp.constraints[4].varCoefs[u_3] == 1).toarray().all())
+        self.assertTrue((lp.constraints[4].varCoefs[u_4] == 1).toarray().all())
+        self.assertTrue((lp.constraints[4].varCoefs[w_3] == 1).toarray().all())
+        self.assertTrue((lp.constraints[4].varCoefs[w_4] == 1).toarray().all())
+        self.assertTrue((lp.constraints[4].varCoefs[v_3] == 1).toarray().all())
+        self.assertTrue((lp.constraints[4].varCoefs[v_4] == 1).toarray().all())
+
+
     def test_create_cglp_infinite_bounds(self):
         # check that infinite var bounds are 0
         inf = square.lp.getCoinInfinity()

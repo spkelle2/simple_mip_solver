@@ -27,7 +27,7 @@ class BaseNode:
     def __init__(self: T, lp: CyClpSimplex, integer_indices: List[int], idx: int = None,
                  dual_bound: Union[float, int] = -float('inf'), b_idx: int = None,
                  b_dir: str = None, b_val: float = None, depth: int = 0,
-                 ancestors: tuple = None, *args, **kwargs):
+                 ancestors: tuple = None, track_dual_bound: bool = False, *args, **kwargs):
         """
         :param lp: model object simplex is run against. Assumed Ax >= b
         :param idx: index of this node (e.g. in the branch and bound tree)
@@ -67,6 +67,7 @@ class BaseNode:
         if ancestors is not None:
             assert isinstance(ancestors, tuple), 'ancestors must be a tuple if provided'
             assert idx not in ancestors, 'idx cannot be an ancestor of itself'
+        assert isinstance(track_dual_bound, bool), 'track_dual_bound is boolean'
 
         lp.logLevel = 0
         self.lp = lp
@@ -102,6 +103,8 @@ class BaseNode:
         self.max_term = np.max(np.abs(self.lp.constraints[0].varCoefs[self.lp.getVarByName('x')]))
         self.children = None
         self.cut_generation_dual_bound = {}
+        self.track_dual_bound = track_dual_bound
+        self.tracked_cut_generation_iterations = 0
 
         # check formatting
         assert self._sense == '>=', 'must have Ax >= b'
@@ -199,13 +202,20 @@ class BaseNode:
             'total_iterations_gmic_removed': total_iterations_gmic_removed + self.iterations_gmic_removed,
             'total_number_gmic_removed': total_number_gmic_removed + self.number_gmic_removed
         }
-        if self.idx is not None:
+        if self.idx is not None and self.cut_generation_dual_bound:
             cut_generation_dual_bound_dict[self.idx] = self.cut_generation_dual_bound
             rtn['cut_generation_dual_bound_dict'] = cut_generation_dual_bound_dict
         return rtn
 
     def _good_cut_generation_dual_bound_dict(self, d: Dict[int, Dict[int, float]]) -> \
             Tuple[bool, Union[str, None]]:
+        """ Check if a given dictionary is sufficiently structured for being a
+                cut_generation_dual_bound_dict
+
+                :param d: the dictionary to check
+                :return: A tuple of whether or not the input dictionary is sufficient and
+                an accompanying error message (None if the input is sufficient)
+        """
         if not isinstance(d, dict):
             return False, f'cut_generation_dual_bound_dict should be a dictionary'
         for idx, dual_bound_dict in d.items():
@@ -233,6 +243,10 @@ class BaseNode:
         algorithm expects
         """
         assert self._x_only_variable, 'x must be our only variable'
+        if self.track_dual_bound:
+            assert self.tracked_cut_generation_iterations not in self.cut_generation_dual_bound, \
+                'lp is only bound once per cut generation iteration'
+
         self.lp.dual()
         self.lp_feasible = self.lp.getStatusCode() in [0, 2]  # optimal or dual infeasible
         self.unbounded = self.lp.getStatusCode() == 2
@@ -244,7 +258,9 @@ class BaseNode:
         int_var_vals = None if not self.lp_feasible else self.solution[self._integer_indices]
         self.mip_feasible = self.lp_feasible and \
             np.max(np.abs(np.round(int_var_vals) - int_var_vals)) <= variable_epsilon
-        self.cut_generation_dual_bound[self.cut_generation_iterations] = self.objective_value
+        if self.track_dual_bound:
+            self.cut_generation_dual_bound[self.tracked_cut_generation_iterations] = \
+                self.objective_value
 
     def _cut_generation_iteration(self: T, cutting_plane_progress_tolerance:
                                   float = cutting_plane_progress_tolerance,
@@ -265,6 +281,8 @@ class BaseNode:
         # bring up anything close to 0 to avoid numerical errors
         self.solution = np.maximum(self.solution, 0)
         self.cut_generation_iterations += 1
+        if self.track_dual_bound:
+            self.tracked_cut_generation_iterations += 1
         prev_objective_value = self.objective_value
 
         self._remove_slack_cuts(**kwargs)

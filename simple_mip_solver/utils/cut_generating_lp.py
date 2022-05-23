@@ -11,7 +11,8 @@ CGLP = TypeVar('CGLP', bound='CutGeneratingLP')
 class CutGeneratingLP:
 
     def __init__(self: CGLP, bb: BranchAndBound, root_id: int, A: np.matrix = None,
-                 b: CyLPArray = None, var_lb: CyLPArray = None, var_ub: CyLPArray = None):
+                 b: CyLPArray = None, var_lb: CyLPArray = None, var_ub: CyLPArray = None,
+                 depth: int = None):
         """ Creates an object that can generate a strong cut valid for the
         disjunction encoded in the subtree of <bb> rooted at node <root_id> by
         solving what is called the Cut Generating LP (CGLP).
@@ -37,9 +38,12 @@ class CutGeneratingLP:
         # sanity checks
         assert isinstance(bb, BranchAndBound), 'bb must be a BranchAndBound instance'
         assert root_id in bb.tree, 'root node of the disjunction must be present in B & B tree'
+        if depth is not None:
+            assert isinstance(depth, int) and depth > 0, 'depth is postive integer'
 
         self.bb = bb
         self.root_id = root_id
+        self.depth = depth
         self.lp = self._create_cglp(A, b, var_lb, var_ub)
         self.cylp_failure = False
 
@@ -68,10 +72,11 @@ class CutGeneratingLP:
         :return: CyClpSimplex instance representing the CGLP
         """
 
-        # get each disjunctive term
-        terminal_nodes = self.bb.tree.get_leaves(self.root_id)
-        # terminal nodes pruned for infeasibility do not expand disjunction, so remove them
-        disjunctive_nodes = {n.idx: n for n in terminal_nodes if n.lp_feasible is not False}
+        # get each disjunctive term (fathomed nodes do not expand disjunction, so remove them)
+        disjunctive_nodes = {
+            n.idx: n for n in self.bb.tree.get_leaves(self.root_id, depth=self.depth,
+                                                      keep='not infeasible')
+        }
         var_dicts = [{v.name: v.dim for v in n.lp.variables} for n in disjunctive_nodes.values()]
         assert all(var_dicts[0] == d for d in var_dicts), \
             'Each disjunctive term should have the same variables. The feature allowing' \
