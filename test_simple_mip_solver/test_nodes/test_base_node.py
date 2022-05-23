@@ -67,6 +67,8 @@ class TestBaseNode(TestModels):
         self.assertTrue(isinstance(node.max_term, CyLPArray) and not node.max_term.shape)
         self.assertFalse(node.children)
         self.assertFalse(node.cut_generation_dual_bound)
+        self.assertFalse(node.track_dual_bound)
+        self.assertFalse(node.tracked_cut_generation_iterations)
 
     def test_init_lineage(self):
         node = BaseNode(self.small_branch_std.lp, self.small_branch_std.integerIndices, idx=0)
@@ -117,6 +119,10 @@ class TestBaseNode(TestModels):
                                BaseNode, lp=self.small_branch_std.lp,
                                integer_indices=self.small_branch_std.integerIndices,
                                idx=0, ancestors=(0,))
+        self.assertRaisesRegex(AssertionError, 'track_dual_bound is boolean',
+                               BaseNode, lp=self.small_branch_std.lp,
+                               integer_indices=self.small_branch_std.integerIndices,
+                               idx=0, track_dual_bound=1)
 
         self.assertRaisesRegex(AssertionError, 'must have Ax >= b',
                                BaseNode, lp=small_branch_max.lp,
@@ -272,6 +278,7 @@ class TestBaseNode(TestModels):
         node._bound_lp()
         obj = node.objective_value
         constrs = node.lp.nConstraints
+        node.track_dual_bound = True
         rtn = node._base_bound(gomory_cuts=True, total_iterations_gmic_created=1,
                                total_number_gmic_created=1, total_iterations_gmic_added=1,
                                total_number_gmic_added=1, total_iterations_gmic_removed=1,
@@ -337,6 +344,10 @@ class TestBaseNode(TestModels):
         node = self.make_multivariable_node()
         self.assertRaisesRegex(AssertionError, 'x must be our only variable',
                                node._bound_lp)
+        node = BaseNode(no_branch.lp, no_branch.integerIndices, track_dual_bound=True)
+        node.cut_generation_dual_bound[0] = -2
+        self.assertRaisesRegex(AssertionError, 'lp is only bound once per cut generation iteration',
+                               node._bound_lp)
     
     def test_bound_lp_integer(self):
         node = BaseNode(no_branch.lp, no_branch.integerIndices)
@@ -347,10 +358,12 @@ class TestBaseNode(TestModels):
         self.assertTrue(node.lp_feasible)
         self.assertTrue(node.mip_feasible)
         self.assertFalse(node.unbounded)
-        self.assertTrue(node.cut_generation_dual_bound == {0: -2})
+        self.assertFalse(node.cut_generation_dual_bound)
+        self.assertFalse(node.tracked_cut_generation_iterations)
 
     def test_bound_lp_fractional(self):
-        node = BaseNode(self.small_branch_std.lp, self.small_branch_std.integerIndices)
+        node = BaseNode(self.small_branch_std.lp, self.small_branch_std.integerIndices,
+                        track_dual_bound=True)
         node._bound_lp()
         self.assertTrue(node.objective_value == -2.75)
         self.assertTrue(all(node.solution == [0, 1.25, 1.5]))
@@ -359,6 +372,7 @@ class TestBaseNode(TestModels):
         self.assertFalse(node.mip_feasible)
         self.assertFalse(node.unbounded)
         self.assertTrue(node.cut_generation_dual_bound == {0: -2.75})
+        self.assertTrue(node.tracked_cut_generation_iterations == 0)
 
     def test_bound_lp_infeasible(self):
         node = BaseNode(infeasible.lp, infeasible.integerIndices)
@@ -369,15 +383,17 @@ class TestBaseNode(TestModels):
         self.assertFalse(node.unbounded)
         self.assertTrue(node.solution is None)
         self.assertTrue(node.objective_value == float('inf'))
-        self.assertTrue(node.cut_generation_dual_bound == {0: float('inf')})
+        self.assertFalse(node.cut_generation_dual_bound)
+        self.assertFalse(node.tracked_cut_generation_iterations)
 
     def test_bound_lp_unbounded(self):
-        node = BaseNode(unbounded.lp, unbounded.integerIndices)
+        node = BaseNode(unbounded.lp, unbounded.integerIndices, track_dual_bound=True)
         node._bound_lp()
 
         self.assertTrue(node.lp_feasible)
         self.assertTrue(node.unbounded)
         self.assertTrue(node.cut_generation_dual_bound == {0: -62500000000000.0})
+        self.assertTrue(node.tracked_cut_generation_iterations == 0)
 
     def test_cut_generation_iteration_fails_asserts(self):
         node = BaseNode(self.small_branch_std.lp, self.small_branch_std.integerIndices)
@@ -412,9 +428,11 @@ class TestBaseNode(TestModels):
             self.assertTrue(sc.called)
             self.assertTrue(obj == node.objective_value + .00001)  # bound_lp called if true
             self.assertTrue(node.cut_generation_stalled)
+            self.assertFalse(node.tracked_cut_generation_iterations)
+            self.assertFalse(node.cut_generation_dual_bound)
 
         # do a normal run just to make sure
-        node = BaseNode(self.cut2_std.lp, self.cut2_std.integerIndices)
+        node = BaseNode(self.cut2_std.lp, self.cut2_std.integerIndices, track_dual_bound=True)
         node._bound_lp()
         obj = node.objective_value
         constrs = node.lp.nConstraints
@@ -422,6 +440,8 @@ class TestBaseNode(TestModels):
         self.assertFalse(node.cut_generation_stalled)
         self.assertTrue(-1.5 > obj - node.objective_value > -1.6)
         self.assertTrue(node.lp.nConstraints > constrs)
+        self.assertTrue(node.tracked_cut_generation_iterations == 1)
+        self.assertTrue(node.cut_generation_dual_bound == {0: -38.0, 1: -36.48})
 
     def test_remove_slack_cuts(self):
         node = BaseNode(self.small_branch_std.lp, self.small_branch_std.integerIndices)

@@ -20,7 +20,7 @@ from test_simple_mip_solver.example_models import no_branch, small_branch, infea
 from test_simple_mip_solver import example_models
 
 
-skip_longs = False
+skip_longs = True
 
 
 class TestBranchAndBoundTree(unittest.TestCase):
@@ -40,16 +40,83 @@ class TestBranchAndBoundTree(unittest.TestCase):
         bb.solve()
         self.assertRaisesRegex(AssertionError, "subtree_root_id must belong to the tree",
                                bb.tree.get_leaves, 20)
+        self.assertRaisesRegex(AssertionError, "depth is a nonnegative integer",
+                               bb.tree.get_leaves, subtree_root_id=0, depth=1.5)
+        self.assertRaisesRegex(AssertionError, "keep is one of 'all', 'feasible', or 'not infeasible'",
+                               bb.tree.get_leaves, subtree_root_id=0, keep=False)
 
     def test_get_leaves(self):
-        bb = BranchAndBound(self.small_branch_std, gomory_cuts=False)
+        bb = BranchAndBound(self.small_branch_std, gomory_cuts=False, node_limit=1)
         bb.solve()
+
+        # feasible vs not infeasible
+        leaves = bb.tree.get_leaves(0, keep='not infeasible')
+        self.assertTrue(len(leaves) == 2)
+        leaves = bb.tree.get_leaves(0, keep='feasible')
+        self.assertFalse(leaves)
+
+        bb.node_limit = float('inf')
+        bb.solve()
+
+        # all leaves
         leaves = bb.tree.get_leaves(0)
         for node_id, node in bb.tree.nodes.items():
-            if node_id in [n.idx for n in  leaves]:
+            if node_id in [n.idx for n in leaves]:
                 self.assertFalse(bb.tree.get_children(node_id))
             else:
                 self.assertTrue(len(bb.tree.get_children(node_id)) == 2)
+
+        # all feasible leaves
+        leaves = bb.tree.get_leaves(0, keep='feasible')
+        for node_id, node in bb.tree.nodes.items():
+            if node_id in [n.idx for n in leaves]:
+                self.assertFalse(bb.tree.get_children(node_id))
+                self.assertTrue(node.attr['node'].lp_feasible)
+            else:
+                self.assertTrue(len(bb.tree.get_children(node_id)) == 2 or not
+                                node.attr['node'].lp_feasible)
+
+        # depth 0 subtree
+        leaves = bb.tree.get_leaves(2, depth=0)
+        self.assertTrue(len(leaves) == 1)
+        self.assertTrue(leaves[0].idx == 2)
+
+        leaves = bb.tree.get_leaves(2, depth=0, keep='feasible')
+        self.assertFalse(leaves)
+
+        # depth 1 subtree
+        leaves = bb.tree.get_leaves(0, depth=1)
+        self.assertTrue(len(leaves) == 2)
+        self.assertTrue(set(n.idx for n in leaves) == {1, 2})
+
+        leaves = bb.tree.get_leaves(0, depth=1, keep='feasible')
+        self.assertTrue(len(leaves) == 1)
+        self.assertTrue(leaves[0].idx == 1)
+
+        # depth 2 subtree
+        leaves = bb.tree.get_leaves(1, depth=2)
+        self.assertTrue({n.idx for n in leaves} == {5, 6, 7, 8})
+        for node in leaves:
+            self.assertTrue(bb.tree.get_parent(bb.tree.get_parent(node.idx)) == 1)
+
+        leaves = bb.tree.get_leaves(1, depth=2, keep='feasible')
+        self.assertTrue({n.idx for n in leaves} == {5, 7})
+        for node in leaves:
+            self.assertTrue(bb.tree.get_parent(bb.tree.get_parent(node.idx)) == 1)
+
+        # depth 3 subtree
+        leaves = bb.tree.get_leaves(1, depth=3)
+        self.assertTrue({n.idx for n in leaves} == {5, 6, 8, 9, 10})
+        for node in leaves:
+            if node.idx <= 8:
+                self.assertTrue(bb.tree.get_parent(bb.tree.get_parent(node.idx)) == 1)
+            else:
+                self.assertTrue(
+                    bb.tree.get_parent(bb.tree.get_parent(bb.tree.get_parent(node.idx))) == 1
+                )
+
+        leaves = bb.tree.get_leaves(1, depth=3, keep='feasible')
+        self.assertTrue({n.idx for n in leaves} == {5, 9})
 
     def test_get_disjunction_fails_asserts(self):
         bb = BranchAndBound(self.small_branch_std, gomory_cuts=False)
@@ -118,6 +185,7 @@ class TestBranchAndBoundTree(unittest.TestCase):
         bb.solve()
         self.assertTrue(bb.tree.subtree_dual_bound(0) == -2)
         self.assertTrue(bb.tree.subtree_dual_bound(2) == float('inf'))
+        self.assertTrue(bb.tree.subtree_dual_bound(0, depth=1) == -2.75)
 
 
 class TestBranchAndBound(unittest.TestCase):
