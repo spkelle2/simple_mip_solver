@@ -84,7 +84,12 @@ class PseudoCostBranchNode(BaseNode):
         self.pseudo_costs[idx][direction] = self.pseudo_costs[idx].get(
             direction, {'cost': 0, 'times': 0})
         if node.lp.getStatusCode() in [0, 3]:  # optimal or hit max iters
+            # CLP gets tripped up warm starting sometimes and gives an objective
+            # better than the dual bound despite having added a constraint
+            # since its just pseudocosting, give the lowest possible value
             bound_change = node.lp.objectiveValue - node.dual_bound
+            if bound_change < 0:
+                bound_change = 0
             variable_change = node._b_val - node.lp.variablesUpper[idx] if \
                 direction == 'left' else node.lp.variablesLower[idx] - node._b_val
             cost = self.pseudo_costs[idx][direction]['cost']

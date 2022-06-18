@@ -62,16 +62,18 @@ class BranchAndBoundTree(BinaryTree):
         return rtn if keep == 'all' else [n for n in rtn if n.lp_feasible] if \
             keep == 'feasible' else [n for n in rtn if n.lp_feasible is not False]
 
-    def get_disjunction(self: BT, subtree_root_id: int) -> List[Tuple[np.ndarray, np.ndarray]]:
+    def get_disjunction(self: BT, subtree_root_id: int) -> Dict[int, Tuple[np.ndarray, np.ndarray]]:
         """ Return the disjunction encoded in the terminal leaves of the branch
         and bound subtree rooted at node with id <subtree_root_id>
 
         :param subtree_root_id: The id of the node that roots our subtree
-        :return: a list of pairs of arrays, (lb, ub). For x to be a feasible solution,
-        there must be a (lb, ub) pair in the list such that lb <= x <= ub
+        :return: a dictionary keyed by indices of nodes with values as pairs of
+        arrays, (lb, ub), representing the variable bounds on the node with the
+        given index. For x to be a feasible solution, there must be a (lb, ub) value
+        in the dict such that lb <= x <= ub.
         """
-        return [(n.lp.variablesLower.copy(), n.lp.variablesUpper.copy())
-                for n in self.get_leaves(subtree_root_id, keep='not infeasible')]
+        return {n.idx: (n.lp.variablesLower.copy(), n.lp.variablesUpper.copy())
+                for n in self.get_leaves(subtree_root_id, keep='not infeasible')}
 
     def get_node_instances(self: BT, node_ids: Union[int, Iterable[int]]) -> \
             Union[BaseNode, List[BaseNode]]:
@@ -120,7 +122,7 @@ class BranchAndBound(BaseAlgorithm):
     # so kwargs = {'strong_branch_iters': 5, 'pseudo_costs': {}}
     def __init__(self: B, model: MILPInstance, Node: Type[BaseNode] = BaseNode,
                  node_queue: Any = None, node_limit: int = float('inf'),
-                 mip_gap: float = .0001, logging=False, max_run_time=float('inf'),
+                 mip_gap: float = .0001, logging: bool = False, max_run_time: float = float('inf'),
                  initial_primal_bound: float = float('inf'), **kwargs: Any):
         f""" Instantiates a Branch and Bound instance.
         
@@ -186,7 +188,6 @@ class BranchAndBound(BaseAlgorithm):
         self.status = 'unsolved'
         self.objective_value = None
         self.primal_bound = initial_primal_bound
-        self.dual_bound = -float('inf')
         self.node_limit = node_limit
         self.tree = BranchAndBoundTree()
         self.tree.add_root(self.root_node.idx, node=self.root_node)
@@ -194,6 +195,10 @@ class BranchAndBound(BaseAlgorithm):
         self.mip_gap = mip_gap
         self.logging = logging
         self.max_run_time = max_run_time
+
+    @property
+    def dual_bound(self):
+        return self.tree.subtree_dual_bound(self.root_node.idx)
 
     @property
     def current_gap(self):
@@ -259,8 +264,6 @@ class BranchAndBound(BaseAlgorithm):
                     self.primal_bound = node.objective_value
                 else:
                     self._process_branch_rtn(node.idx, node.branch(**self._kwargs))
-
-        self.dual_bound = self.tree.subtree_dual_bound(self.root_node.idx)
 
     def _process_branch_rtn(self: B, parent_id: int, rtn: Dict[str, Any]):
         """ Pull the nodes returned from branching out of the rtn dict and into

@@ -32,22 +32,27 @@ class DisjunctiveCutBoundNode(BaseNode):
 
     def __init__(self: G, cglp: CutGeneratingLP = None,
                  prev_cglp_basis: Tuple[np.ndarray, np.ndarray] = None,
-                 *args, **kwargs):
+                 force_create_cglp: bool = False, *args, **kwargs):
         """
 
         :param cglp: The CGLP instance to use for creating disjunctive cuts, off which
         children's CGLP's will be built
         :param prev_cglp_basis: The starting basis status for each variable in the CGLP instance
+        :param force_create_cglp: Create the CGLP even if previous nodes or
+        iterations failed to make one that generated a tightening cut
         :param args: Arguments to pass on to super class instantiation
         :param kwargs: Key word arguments to pass on to super class instantiation
         """
         super().__init__(*args, **kwargs)
+        assert isinstance(force_create_cglp, bool), 'force_create_cglp is bool'
         if cglp is not None:
             assert isinstance(cglp, CutGeneratingLP), 'cglp must be CutGeneratingLP instance'
+        else:
+            assert not force_create_cglp, 'cannot force creation of CGLP that does not exist'
 
         self.cglp = cglp
         self.prev_cglp_basis = prev_cglp_basis
-        self.current_node_added_cglp = False
+        self.current_node_added_cglp = force_create_cglp  # override as true if force creating
         # flag tracking if current node or previous cut generation iteration added cglp
         self.previous_cglp_added = self.cglp is not None
         self.cglp_name_pattern = re.compile('^cut_cglp_')
@@ -56,6 +61,7 @@ class DisjunctiveCutBoundNode(BaseNode):
         self.number_cglp_created = 0
         self.number_cglp_added = 0
         self.number_cglp_removed = 0
+        self.force_create_cglp = force_create_cglp
 
     def bound(self: G, total_number_cglp_created: int = 0, total_number_cglp_added: int = 0,
               total_number_cglp_removed: int = 0, **kwargs: Any) -> Dict[str, Any]:
@@ -176,7 +182,8 @@ class DisjunctiveCutBoundNode(BaseNode):
         assert isinstance(cglp_cumulative_constraints, bool), 'cglp_cumulative_constraints is bool'
         assert isinstance(cglp_cumulative_bounds, bool), 'cglp_cumulative_bounds is bool'
 
-        self.previous_cglp_added = False
+        # previous CGLP is always "added" if we're forcing the creation of CGLP in each iteration
+        self.previous_cglp_added = self.force_create_cglp
         added_cuts = super()._select_cuts(**kwargs)
         for idx, (pi, pi0) in added_cuts.items():
             if self.cglp_name_pattern.match(idx):  # this node or previous node's cglps
@@ -213,7 +220,7 @@ class DisjunctiveCutBoundNode(BaseNode):
 
         # don't pass on cglp if this node didn't use the cut
         if self.cglp is None or not self.current_node_added_cglp:
-            return super().branch(**kwargs)
+            return super().branch(force_create_cglp=self.force_create_cglp, **kwargs)
 
         elif cglp_cumulative_constraints or cglp_cumulative_bounds:
             A = None if not cglp_cumulative_constraints else self.lp.coefMatrix.copy()
@@ -223,9 +230,9 @@ class DisjunctiveCutBoundNode(BaseNode):
 
             cglp = CutGeneratingLP(bb=self.cglp.bb, root_id=self.cglp.root_id,
                                    A=A, b=b, var_lb=var_lb, var_ub=var_ub)
-            return super().branch(cglp=cglp, **kwargs)
+            return super().branch(cglp=cglp, force_create_cglp=self.force_create_cglp, **kwargs)
 
         else:
             # if recycling CGLP, pass on basis because children solutions wont be far off
             return super().branch(cglp=self.cglp, prev_cglp_basis=self.cglp.lp.getBasisStatus(),
-                                  **kwargs)
+                                  force_create_cglp=self.force_create_cglp, **kwargs)

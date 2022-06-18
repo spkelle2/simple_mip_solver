@@ -5,6 +5,16 @@ import numpy as np
 from simple_mip_solver.utils.tolerance import cut_tolerance
 
 
+def check_solution(sol: list, lp: CyClpSimplex):
+    """ raise an exception if sol does not belong to the feasible region of the
+    given LP so we can debug here and figure out what is going on
+
+    To be used in BaseNode._bound_lp
+    """
+    assert all((lp.variablesLower <= sol) * (sol <= lp.variablesUpper)) and \
+           all(lp.coefMatrix * np.vstack(sol) >= lp.constraintsLower.reshape(-1, 1) - 1e-6)
+
+
 def check_cut(sol: list, lp: CyClpSimplex, pi: np.ndarray, pi0: float):
     """ raise an exception if sol belongs to this disjunctive term's LP (first two checks)
     relaxation and the cut violates it (third check) so we can debug here and figure out what

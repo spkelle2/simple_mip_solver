@@ -133,21 +133,21 @@ class TestFloatingPoint(unittest.TestCase):
         pi = CyLPArray([1, 100, 10000])
         pi0 = 100
         safe_pi, safe_pi0 = numerically_safe_cut(pi=pi, pi0=pi0, estimate='over',
-                                                 make_integer=True)
+                                                 make_integer=True, max_term=1000)
         self.assertTrue(all(safe_pi == np.array([100, 1, 100])))
         self.assertTrue(isclose(safe_pi0, 1, abs_tol=eps))
 
         pi = CyLPArray([100, 9999, 10000])
         pi0 = 100
         safe_pi, safe_pi0 = numerically_safe_cut(pi=pi, pi0=pi0, estimate='under',
-                                                 make_integer=True)
+                                                 make_integer=True, max_term=1000)
         self.assertTrue(all(safe_pi == np.array([1, 0, 100])))
         self.assertTrue(isclose(safe_pi0, 1, abs_tol=eps))
 
     def test_get_fraction_fails_asserts(self):
         self.assertRaisesRegex(AssertionError, 'should be an int or float',
                                get_fraction, '5')
-        self.assertRaisesRegex(AssertionError, 'should be a positive integer',
+        self.assertRaisesRegex(AssertionError, 'should be positive',
                                get_fraction, .3445345, max_term=-1)
         self.assertRaisesRegex(AssertionError, "should be 'over' or 'under'",
                                get_fraction, .3445345, estimate='over-estimate')

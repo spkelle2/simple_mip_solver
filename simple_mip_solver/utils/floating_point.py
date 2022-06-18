@@ -5,7 +5,7 @@ from typing import Tuple, Union
 import warnings
 
 from simple_mip_solver.utils.tolerance import good_coefficient_approximation_epsilon, \
-    exact_coefficient_approximation_epsilon
+    exact_coefficient_approximation_epsilon, max_term
 
 
 def scale_cut(pi: np.ndarray, pi0: float, max_abs: float = 1, **kwargs) -> \
@@ -103,7 +103,7 @@ def numerically_safe_cut(pi: CyLPArray, pi0: float, estimate: str = 'over',
     return safe_pi, safe_pi0
 
 
-def get_fraction(x: float, max_term: int = 1000, estimate: str = None, **kwargs) -> Tuple[int, int]:
+def get_fraction(x: float, max_term: int = max_term, estimate: str = None, **kwargs) -> Tuple[int, int]:
     """Get the nearest fraction to the input floating point number. The denominator
     will always come back positive. Implementation of
     https://en.wikipedia.org/wiki/Continued_fraction#Infinite_continued_fractions_and_convergents
@@ -121,7 +121,7 @@ def get_fraction(x: float, max_term: int = 1000, estimate: str = None, **kwargs)
     as the denominator
     """
     assert isinstance(x, int) or isinstance(x, float), 'x should be an int or float'
-    assert isinstance(max_term, int) and max_term > 0, 'max_term should be a positive integer'
+    assert isinstance(max_term, (int, float)) and max_term > 0, 'max_term should be positive'
     if estimate is not None:
         assert estimate in ['over', 'under'], "estimate should be 'over' or 'under' when provided"
 

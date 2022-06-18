@@ -20,7 +20,7 @@ from test_simple_mip_solver.example_models import no_branch, small_branch, infea
 from test_simple_mip_solver import example_models
 
 
-skip_longs = True
+skip_longs = False
 
 
 class TestBranchAndBoundTree(unittest.TestCase):
@@ -128,10 +128,10 @@ class TestBranchAndBoundTree(unittest.TestCase):
         bb = BranchAndBound(self.small_branch_std, gomory_cuts=False)
         bb.solve()
         disjunction = bb.tree.get_disjunction(0)
-        self.assertTrue(all(disjunction[0][0] == [0, 0, 0]))
-        self.assertTrue(all(disjunction[0][1] == [0, 1, 1]))
-        self.assertTrue(all(disjunction[1][0] == [1, 0, 0]))
-        self.assertTrue(all(disjunction[1][1] == [1, 1, 0]))
+        self.assertTrue(all(disjunction[5][0] == [0, 0, 0]))
+        self.assertTrue(all(disjunction[5][1] == [0, 1, 1]))
+        self.assertTrue(all(disjunction[11][0] == [1, 0, 0]))
+        self.assertTrue(all(disjunction[11][1] == [1, 1, 0]))
 
     def test_get_node_instances_fails_asserts(self):
         bb = BranchAndBound(self.small_branch_std, gomory_cuts=False)

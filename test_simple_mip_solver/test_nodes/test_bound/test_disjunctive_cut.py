@@ -34,6 +34,12 @@ class TestNode(TestModels):
                                DisjunctiveCutBoundNode, cglp=cglp.lp, cut_generating_lp=True,
                                cglp_cumulative_constraints=True, lp=bb.root_node.lp,
                                integer_indices=self.cut1_std.integerIndices)
+        self.assertRaisesRegex(AssertionError, 'is bool',
+                               DisjunctiveCutBoundNode, force_create_cglp=1,
+                               lp=bb.root_node.lp, integer_indices=self.cut1_std.integerIndices)
+        self.assertRaisesRegex(AssertionError, 'cannot force',
+                               DisjunctiveCutBoundNode, force_create_cglp=True,
+                               lp=bb.root_node.lp, integer_indices=self.cut1_std.integerIndices)
 
     def test_init(self):
         bb = BranchAndBound(self.cut1_std)
@@ -50,6 +56,12 @@ class TestNode(TestModels):
         self.assertFalse(n.number_cglp_created)
         self.assertFalse(n.number_cglp_added)
         self.assertFalse(n.number_cglp_removed)
+        self.assertFalse(n.force_create_cglp)
+
+        n = DisjunctiveCutBoundNode(lp=bb.root_node.lp, integer_indices=self.cut1_std.integerIndices,
+                                    cglp=cglp, force_create_cglp=True)
+        self.assertTrue(n.current_node_added_cglp)
+        self.assertTrue(n.force_create_cglp)
 
     def test_bound_fails_asserts(self):
         bb = BranchAndBound(self.cut1_std)
@@ -324,6 +336,28 @@ class TestNode(TestModels):
             self.assertTrue(node.sharable_cuts)
             self.assertTrue({c for c in added_cuts} == {'cut_cglp_0_0', 'cut_gomory_0_0_0'})
 
+    def test_select_cuts_force_create_cglp(self):
+        bb = BranchAndBound(self.cut1_std, gomory_cuts=False)
+        bb.solve()
+        cglp = CutGeneratingLP(bb, bb.root_node.idx)
+        node = DisjunctiveCutBoundNode(lp=self.cut1_std.lp,
+                                       integer_indices=self.cut1_std.integerIndices,
+                                       cglp=cglp, idx=0, force_create_cglp=True)
+
+        # check function calls
+        with patch('simple_mip_solver.nodes.base_node.BaseNode._select_cuts') as sc:
+            # no cglp cut from this node
+            sc.return_value = {'cut_gomory_0_0_0': (CyLPArray([1, 0]), 1),
+                               'cut_cglp_1_0': (CyLPArray([0, 1]), 1)}
+            added_cuts = node._select_cuts(cglp_cumulative_constraints=False,
+                                           cglp_cumulative_bounds=False)
+            self.assertTrue(sc.call_count == 1)
+            self.assertTrue(node.current_node_added_cglp)
+            self.assertTrue(node.previous_cglp_added)
+            self.assertFalse(node.sharable_cuts)
+            self.assertTrue(node.number_cglp_added == 1)
+            self.assertTrue({c for c in added_cuts} == {'cut_gomory_0_0_0', 'cut_cglp_1_0'})
+
     def test_branch_fails_asserts(self):
         n = DisjunctiveCutBoundNode(lp=self.cut1_std.lp, integer_indices=self.cut1_std.integerIndices)
         n.bound()
@@ -345,6 +379,7 @@ class TestNode(TestModels):
             rtn = n.branch()
             self.assertTrue(bm.called)
             self.assertFalse(bm.call_args.args)
+            self.assertFalse(bm.call_args.kwargs['force_create_cglp'])
             self.assertTrue(rtn == 'rtn', 'should just return what parent branch does')
 
         # cglp cut not added
@@ -355,6 +390,7 @@ class TestNode(TestModels):
             rtn = n.branch()
             self.assertTrue(bm.called)
             self.assertFalse(bm.call_args.args)
+            self.assertFalse(bm.call_args.kwargs['force_create_cglp'])
             self.assertTrue(rtn == 'rtn', 'should just return what parent branch does')
 
         # growing cglp
@@ -362,7 +398,7 @@ class TestNode(TestModels):
         bb.solve()
         cglp = CutGeneratingLP(bb, bb.root_node.idx)
         n = DisjunctiveCutBoundNode(lp=self.cut1_std.lp, integer_indices=self.cut1_std.integerIndices,
-                                    cglp=cglp)
+                                    cglp=cglp, force_create_cglp=True)
         n._bound_lp()
         n.current_node_added_cglp = True
         with patch('simple_mip_solver.nodes.bound.disjunctive_cut.CutGeneratingLP',
@@ -386,6 +422,7 @@ class TestNode(TestModels):
             self.assertTrue(bm.called)
             args, kwargs = bm.call_args
             self.assertTrue(isinstance(kwargs['cglp'], CutGeneratingLP))
+            self.assertTrue(bm.call_args.kwargs['force_create_cglp'])
             self.assertTrue(rtn == 'rtn', 'should just return what parent branch does')
 
         # static cglp
@@ -407,7 +444,7 @@ class TestNode(TestModels):
     Node = DisjunctiveCutBoundNode
 
     # test after fixing branch and bound tests
-    def test_models(self):
+    def test_zmodels(self):
         self.disjunctive_cut_test_models()
 
 

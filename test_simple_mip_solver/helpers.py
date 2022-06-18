@@ -73,7 +73,7 @@ class TestModels(unittest.TestCase):
                             bb._kwargs['total_iterations_gmic_created'])
 
     def disjunctive_cut_test_models(self):
-        ratio_run = 1
+        ratio_run = .1
         count_different = 0
         dif = {}
         self.assertTrue(gu, 'gurobipy needed for this test')
@@ -91,7 +91,7 @@ class TestModels(unittest.TestCase):
         num_fldrs = len(os.listdir(fldr))
         for j, kwargs in enumerate(kwargs_list):
             for i, file in enumerate(os.listdir(fldr)):
-                # todo: test_disjunctive_cut.test_models generates a bad GMIC for i == 3
+                # todo: test_disjunctive_cut.test_models generates a bad GMIC for i in 3
                 if np.random.uniform() > ratio_run or i == 3:
                     continue
                 print(f'running test {(i + 1) + j * num_fldrs} of {num_kwargs * num_fldrs}')
