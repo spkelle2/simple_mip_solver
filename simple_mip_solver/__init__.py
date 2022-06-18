@@ -6,4 +6,4 @@ from simple_mip_solver.nodes.bound.disjunctive_cut import DisjunctiveCutBoundNod
 from simple_mip_solver.nodes.nodes import PseudoCostBranchDepthFirstSearchNode, \
     DisjunctiveCutBoundPseudoCostBranchNode
 
-__version__ = '2.2.0'
+__version__ = '2.3.0'

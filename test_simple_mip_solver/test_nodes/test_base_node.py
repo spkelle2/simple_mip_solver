@@ -67,8 +67,8 @@ class TestBaseNode(TestModels):
         self.assertTrue(isinstance(node.max_term, CyLPArray) and not node.max_term.shape)
         self.assertFalse(node.children)
         self.assertFalse(node.cut_generation_dual_bound)
-        self.assertFalse(node.track_dual_bound)
         self.assertFalse(node.tracked_cut_generation_iterations)
+        self.assertFalse(node.cut_generation_terminator)
 
     def test_init_lineage(self):
         node = BaseNode(self.small_branch_std.lp, self.small_branch_std.integerIndices, idx=0)
@@ -119,10 +119,6 @@ class TestBaseNode(TestModels):
                                BaseNode, lp=self.small_branch_std.lp,
                                integer_indices=self.small_branch_std.integerIndices,
                                idx=0, ancestors=(0,))
-        self.assertRaisesRegex(AssertionError, 'track_dual_bound is boolean',
-                               BaseNode, lp=self.small_branch_std.lp,
-                               integer_indices=self.small_branch_std.integerIndices,
-                               idx=0, track_dual_bound=1)
 
         self.assertRaisesRegex(AssertionError, 'must have Ax >= b',
                                BaseNode, lp=small_branch_max.lp,
@@ -154,7 +150,7 @@ class TestBaseNode(TestModels):
 
     def test_base_bound_fails_asserts(self):
         node = BaseNode(infeasible.lp, infeasible.integerIndices)
-        self.assertRaisesRegex(AssertionError, 'must be a positive integer',
+        self.assertRaisesRegex(AssertionError, 'must be a positive number',
                                node._base_bound, max_cut_generation_iterations=-1)
         self.assertRaisesRegex(AssertionError, 'is nonnegative integer',
                                node._base_bound, total_cut_generation_iterations=-1)
@@ -172,6 +168,10 @@ class TestBaseNode(TestModels):
                                node._base_bound, total_number_gmic_removed=-1)
         self.assertRaisesRegex(AssertionError, 'should be a dictionary',
                                node._base_bound, cut_generation_dual_bound_dict='fish')
+        self.assertRaisesRegex(AssertionError, 'is nonnegative',
+                               node._base_bound, max_cut_generation_run_time=-1)
+        self.assertRaisesRegex(AssertionError, 'is a number',
+                               node._base_bound, max_dual_bound='5')
 
     def test_base_bound(self):
         node = BaseNode(infeasible.lp, infeasible.integerIndices)
@@ -191,15 +191,18 @@ class TestBaseNode(TestModels):
             # initially infeasible
             node.lp_feasible = False
             node.mip_feasible = False
+            node.objective_value = float('inf')
 
             node._base_bound()
 
             self.assertFalse(gcgdbd.called)
             self.assertTrue(bl.called)
             self.assertFalse(node.cut_generation_iterations)  # would be 1 if mock called
+            self.assertFalse(node.cut_generation_terminator)
 
             # infeasible after a cut generation iteration
             node.lp_feasible = True
+            node.objective_value = 100
             max_iters = 3
             node._base_bound(max_cut_generation_iterations=max_iters,
                              cut_generation_dual_bound_dict={5: {0: 1.25}})
@@ -210,6 +213,36 @@ class TestBaseNode(TestModels):
             self.assertFalse(node.mip_feasible)
             self.assertFalse(node.cut_generation_stalled)
             self.assertTrue(node.cut_generation_iterations == 1)
+            self.assertFalse(node.cut_generation_terminator)
+
+        node = BaseNode(infeasible.lp, infeasible.integerIndices)
+        with patch.object(node, '_bound_lp') as bl, \
+                patch.object(node, '_cut_generation_iteration', new=patch_cgi_failed_iter) as cgi, \
+                patch.object(node, '_good_cut_generation_dual_bound_dict') as gcgdbd:
+
+            gcgdbd.return_value = True
+
+            # max cut generation run time exceeded
+            node.lp_feasible = True
+            node.objective_value = 5
+            node._base_bound(max_cut_generation_run_time=0)
+            self.assertFalse(gcgdbd.called)
+            self.assertTrue(bl.call_count == 1)
+            self.assertTrue(node.lp_feasible)
+            self.assertFalse(node.mip_feasible)
+            self.assertFalse(node.cut_generation_stalled)
+            self.assertFalse(node.cut_generation_iterations)
+            self.assertTrue(node.cut_generation_terminator == 'time')
+
+            # max dual bound exceeded
+            node._base_bound(max_dual_bound=-float('inf'))
+            self.assertFalse(gcgdbd.called)
+            self.assertTrue(bl.call_count == 2)
+            self.assertTrue(node.lp_feasible)
+            self.assertFalse(node.mip_feasible)
+            self.assertFalse(node.cut_generation_stalled)
+            self.assertFalse(node.cut_generation_iterations)
+            self.assertTrue(node.cut_generation_terminator == 'dual bound')
 
         def patch_cgi_iter():
             node.cut_generation_iterations += 1
@@ -227,6 +260,7 @@ class TestBaseNode(TestModels):
             self.assertFalse(node.mip_feasible)
             self.assertFalse(node.cut_generation_stalled)
             self.assertTrue(node.cut_generation_iterations == max_cut_generation_iterations)
+            self.assertTrue(node.cut_generation_terminator == 'max iterations')
 
         node = BaseNode(infeasible.lp, infeasible.integerIndices)
 
@@ -237,6 +271,7 @@ class TestBaseNode(TestModels):
         with patch.object(node, '_bound_lp') as bl, \
                 patch.object(node, '_cut_generation_iteration', new=patch_cgi_stall) as cgi:
             node.lp_feasible = True
+            node.objective_value = 5
             node._base_bound(max_cut_generation_iterations=max_cut_generation_iterations)
 
             self.assertTrue(bl.called)
@@ -244,6 +279,7 @@ class TestBaseNode(TestModels):
             self.assertFalse(node.mip_feasible)
             self.assertTrue(node.cut_generation_stalled)
             self.assertTrue(node.cut_generation_iterations < max_cut_generation_iterations)
+            self.assertFalse(node.cut_generation_terminator)
 
         node = BaseNode(infeasible.lp, infeasible.integerIndices)
 
@@ -254,6 +290,7 @@ class TestBaseNode(TestModels):
         with patch.object(node, '_bound_lp') as bl, \
                 patch.object(node, '_cut_generation_iteration', new=patch_cgi_mip_feasible) as cgi:
             node.lp_feasible = True
+            node.objective_value = 5
             node._base_bound(max_cut_generation_iterations=max_cut_generation_iterations)
 
             self.assertTrue(bl.called)
@@ -261,6 +298,7 @@ class TestBaseNode(TestModels):
             self.assertTrue(node.mip_feasible)
             self.assertFalse(node.cut_generation_stalled)
             self.assertTrue(node.cut_generation_iterations < max_cut_generation_iterations)
+            self.assertFalse(node.cut_generation_terminator)
 
         # feasible mip
         with patch.object(node, '_bound_lp') as bl, \
@@ -272,22 +310,24 @@ class TestBaseNode(TestModels):
             self.assertTrue(bl.called)
             self.assertFalse(cgi.called)
             self.assertFalse('cut_generation_dual_bound_dict' in rtn)  # shouldn't return if no idx given
+            self.assertFalse(node.cut_generation_terminator)
 
         # do normal run to make sure we're ok
         node = BaseNode(self.cut2_std.lp, self.cut2_std.integerIndices, idx=0)
-        node._bound_lp()
+        node._bound_lp(track_dual_bound=True)
         obj = node.objective_value
         constrs = node.lp.nConstraints
-        node.track_dual_bound = True
         rtn = node._base_bound(gomory_cuts=True, total_iterations_gmic_created=1,
                                total_number_gmic_created=1, total_iterations_gmic_added=1,
                                total_number_gmic_added=1, total_iterations_gmic_removed=1,
-                               total_number_gmic_removed=1, total_cut_generation_iterations=10)
+                               total_number_gmic_removed=1, total_cut_generation_iterations=10,
+                               track_dual_bound=True)
         self.assertTrue(node.lp_feasible)
         self.assertFalse(node.cut_generation_stalled)
         self.assertTrue(-2.01 < obj - node.objective_value < -1.99)
         self.assertTrue(node.lp.nConstraints > constrs)
         self.assertTrue(node.mip_feasible)
+        self.assertFalse(node.cut_generation_terminator)
         self.assertTrue(rtn['total_iterations_gmic_created'] == 4)
         self.assertTrue(rtn['total_number_gmic_created'] == 7)
         self.assertTrue(rtn['total_iterations_gmic_added'] == 4)
@@ -344,10 +384,12 @@ class TestBaseNode(TestModels):
         node = self.make_multivariable_node()
         self.assertRaisesRegex(AssertionError, 'x must be our only variable',
                                node._bound_lp)
-        node = BaseNode(no_branch.lp, no_branch.integerIndices, track_dual_bound=True)
+        node = BaseNode(no_branch.lp, no_branch.integerIndices)
+        self.assertRaisesRegex(AssertionError, 'is boolean',
+                               node._bound_lp, track_dual_bound='True')
         node.cut_generation_dual_bound[0] = -2
         self.assertRaisesRegex(AssertionError, 'lp is only bound once per cut generation iteration',
-                               node._bound_lp)
+                               node._bound_lp, track_dual_bound=True)
     
     def test_bound_lp_integer(self):
         node = BaseNode(no_branch.lp, no_branch.integerIndices)
@@ -362,9 +404,8 @@ class TestBaseNode(TestModels):
         self.assertFalse(node.tracked_cut_generation_iterations)
 
     def test_bound_lp_fractional(self):
-        node = BaseNode(self.small_branch_std.lp, self.small_branch_std.integerIndices,
-                        track_dual_bound=True)
-        node._bound_lp()
+        node = BaseNode(self.small_branch_std.lp, self.small_branch_std.integerIndices)
+        node._bound_lp(track_dual_bound=True)
         self.assertTrue(node.objective_value == -2.75)
         self.assertTrue(all(node.solution == [0, 1.25, 1.5]))
         # fractional solutions should come back as lp but not mip feasible
@@ -387,8 +428,8 @@ class TestBaseNode(TestModels):
         self.assertFalse(node.tracked_cut_generation_iterations)
 
     def test_bound_lp_unbounded(self):
-        node = BaseNode(unbounded.lp, unbounded.integerIndices, track_dual_bound=True)
-        node._bound_lp()
+        node = BaseNode(unbounded.lp, unbounded.integerIndices)
+        node._bound_lp(track_dual_bound=True)
 
         self.assertTrue(node.lp_feasible)
         self.assertTrue(node.unbounded)
@@ -400,6 +441,8 @@ class TestBaseNode(TestModels):
         node._bound_lp()
         self.assertRaisesRegex(AssertionError, 'must be positive',
                                node._cut_generation_iteration, cutting_plane_progress_tolerance=0)
+        self.assertRaisesRegex(AssertionError, 'is boolean',
+                               node._cut_generation_iteration, track_dual_bound=1)
         node.solution = np.array([0, 0, -1])
         self.assertRaisesRegex(AssertionError, 'we must have x >= 0',
                                node._cut_generation_iteration)
@@ -410,7 +453,7 @@ class TestBaseNode(TestModels):
         obj = node.objective_value
         cuts = {'cut_gomory_0_1_0': (CyLPArray([0, -1, 0]), -2)}
 
-        def patch_bound_lp():
+        def patch_bound_lp(track_dual_bound=False):
             node.objective_value -= .00001
 
         # check function calls and check attribute changes
@@ -430,18 +473,20 @@ class TestBaseNode(TestModels):
             self.assertTrue(node.cut_generation_stalled)
             self.assertFalse(node.tracked_cut_generation_iterations)
             self.assertFalse(node.cut_generation_dual_bound)
+            self.assertTrue(node.cut_generation_terminator == 'cuts not deep enough')
 
         # do a normal run just to make sure
-        node = BaseNode(self.cut2_std.lp, self.cut2_std.integerIndices, track_dual_bound=True)
-        node._bound_lp()
+        node = BaseNode(self.cut2_std.lp, self.cut2_std.integerIndices)
+        node._bound_lp(track_dual_bound=True)
         obj = node.objective_value
         constrs = node.lp.nConstraints
-        node._cut_generation_iteration(gomory_cuts=True)
+        node._cut_generation_iteration(gomory_cuts=True, track_dual_bound=True)
         self.assertFalse(node.cut_generation_stalled)
         self.assertTrue(-1.5 > obj - node.objective_value > -1.6)
         self.assertTrue(node.lp.nConstraints > constrs)
         self.assertTrue(node.tracked_cut_generation_iterations == 1)
         self.assertTrue(node.cut_generation_dual_bound == {0: -38.0, 1: -36.48})
+        self.assertFalse(node.cut_generation_terminator)
 
     def test_remove_slack_cuts(self):
         node = BaseNode(self.small_branch_std.lp, self.small_branch_std.integerIndices)
@@ -545,6 +590,42 @@ class TestBaseNode(TestModels):
             self.assertTrue(ugc.called)
             self.assertTrue(ugc.call_args.kwargs['operation'] == 'added')
             self.assertTrue(ugc.call_args.kwargs['cut_idxs'] == added_cuts)
+            self.assertFalse(node.cut_generation_terminator)
+
+    def test_select_cuts_activates_generation_terminator(self):
+        cuts = {
+            'cut_1': (CyLPArray([-1, -1, -1]), -2.7499999999)
+        }
+        node = BaseNode(self.small_branch_std.lp, self.small_branch_std.integerIndices)
+        node._bound_lp()
+
+        node.cut_pool = cuts
+        with patch.object(node, '_update_gmic_counts') as ugc:
+            added_cuts = node._select_cuts()
+            self.assertTrue(set(node.cut_pool.keys()) == {'cut_1'})
+            self.assertTrue(node.cut_generation_terminator == 'no sufficient cuts')
+
+        cuts = {
+            'cut_1': (CyLPArray([-1, -1, -1]), -3)
+        }
+        node = BaseNode(self.small_branch_std.lp, self.small_branch_std.integerIndices)
+        node._bound_lp()
+
+        node.cut_pool = cuts
+        with patch.object(node, '_update_gmic_counts') as ugc:
+            added_cuts = node._select_cuts()
+            self.assertTrue(set(node.cut_pool.keys()) == {'cut_1'})
+            self.assertTrue(node.cut_generation_terminator == 'no improving cuts')
+
+        cuts = {}
+        node = BaseNode(self.small_branch_std.lp, self.small_branch_std.integerIndices)
+        node._bound_lp()
+
+        node.cut_pool = cuts
+        with patch.object(node, '_update_gmic_counts') as ugc:
+            added_cuts = node._select_cuts()
+            self.assertFalse(node.cut_pool)
+            self.assertTrue(node.cut_generation_terminator == 'no cuts')
 
     def test_select_cuts_different_tolerances(self):
         cuts = {
@@ -568,6 +649,7 @@ class TestBaseNode(TestModels):
             self.assertTrue(ugc.called)
             self.assertTrue(ugc.call_args.kwargs['operation'] == 'added')
             self.assertTrue(ugc.call_args.kwargs['cut_idxs'] == added_cuts)
+            self.assertFalse(node.cut_generation_terminator)
 
     def test_find_gomory_cuts(self):
         node = BaseNode(lp=self.cut3_std.lp, integer_indices=self.cut3_std.integerIndices)

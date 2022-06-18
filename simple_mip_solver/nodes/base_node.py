@@ -6,6 +6,7 @@ from math import floor, ceil, degrees, acos
 import numpy as np
 import re
 from statistics import median
+import time
 from typing import Union, List, TypeVar, Dict, Any, Tuple, Set
 
 from simple_mip_solver.utils.floating_point import numerically_safe_cut
@@ -13,7 +14,8 @@ from simple_mip_solver.utils.tolerance import variable_epsilon,\
     good_coefficient_approximation_epsilon, max_nonzero_coefs, parallel_cut_tolerance, \
     cutting_plane_progress_tolerance, max_cut_generation_iterations, max_relative_cut_term_ratio, \
     min_cut_depth
-from test_simple_mip_solver.test_utils.test_utils import check_cut_against_grid, check_cut
+from test_simple_mip_solver.test_utils.test_utils import check_cut_against_grid, \
+    check_cut, check_solution
 
 T = TypeVar('T', bound='BaseNode')
 
@@ -27,11 +29,11 @@ class BaseNode:
     def __init__(self: T, lp: CyClpSimplex, integer_indices: List[int], idx: int = None,
                  dual_bound: Union[float, int] = -float('inf'), b_idx: int = None,
                  b_dir: str = None, b_val: float = None, depth: int = 0,
-                 ancestors: tuple = None, track_dual_bound: bool = False, *args, **kwargs):
+                 ancestors: tuple = None, *args, **kwargs):
         """
         :param lp: model object simplex is run against. Assumed Ax >= b
-        :param idx: index of this node (e.g. in the branch and bound tree)
         :param integer_indices: indices of variables we aim to find integer solutions
+        :param idx: index of this node (e.g. in the branch and bound tree)
         :param dual_bound: starting lower bound on optimal objective value
         assuming minimization problem in this node
         :param b_idx: index of the branching variable
@@ -67,7 +69,6 @@ class BaseNode:
         if ancestors is not None:
             assert isinstance(ancestors, tuple), 'ancestors must be a tuple if provided'
             assert idx not in ancestors, 'idx cannot be an ancestor of itself'
-        assert isinstance(track_dual_bound, bool), 'track_dual_bound is boolean'
 
         lp.logLevel = 0
         self.lp = lp
@@ -103,8 +104,8 @@ class BaseNode:
         self.max_term = np.max(np.abs(self.lp.constraints[0].varCoefs[self.lp.getVarByName('x')]))
         self.children = None
         self.cut_generation_dual_bound = {}
-        self.track_dual_bound = track_dual_bound
         self.tracked_cut_generation_iterations = 0
+        self.cut_generation_terminator = None
 
         # check formatting
         assert self._sense == '>=', 'must have Ax >= b'
@@ -139,6 +140,7 @@ class BaseNode:
                     total_number_gmic_added: int = 0, total_iterations_gmic_removed: int = 0,
                     total_number_gmic_removed: int = 0,
                     cut_generation_dual_bound_dict: Dict[int, Dict[int, float]] = None,
+                    max_cut_generation_run_time: int = None, max_dual_bound: float = float('inf'),
                     **kwargs) -> Dict[str, Any]:
         """bound subroutine to be shared by all superclasses. Bounds the LP
         relaxation then calls the cut generation subroutine
@@ -164,13 +166,17 @@ class BaseNode:
         :param cut_generation_dual_bound_dict: Dictionary keyed by node index tracking
         each's dual bound after every cut generation iteration (iteration 0 is the
         bound after branching on the parent)
+        :param max_cut_generation_run_time: Max amount of time in seconds cut generation
+        will run before terminating
+        :param max_dual_bound: Objective value when surpassed will terminate cut
+        generation
         :param kwargs: dictionary of arguments to pass on to selected subroutines
         :return: Dictionary of updated running totals for GMIC operations
         """
         cut_generation_dual_bound_dict = cut_generation_dual_bound_dict or {}
 
-        assert isinstance(max_cut_generation_iterations, int) and max_cut_generation_iterations > 0, \
-            'max_cut_generation_iterations must be a positive integer'
+        assert isinstance(max_cut_generation_iterations, (int, float)) and max_cut_generation_iterations > 0, \
+            'max_cut_generation_iterations must be a positive number'
         assert isinstance(total_cut_generation_iterations, int) and total_cut_generation_iterations >= 0, \
             "total_cut_generation_iterations is nonnegative integer"
         assert isinstance(total_iterations_gmic_added, int) and total_iterations_gmic_added >= 0, \
@@ -188,11 +194,27 @@ class BaseNode:
         if cut_generation_dual_bound_dict:
             good, msg = self._good_cut_generation_dual_bound_dict(cut_generation_dual_bound_dict)
             assert good, msg
+        if max_cut_generation_run_time is None:
+            max_cut_generation_run_time = float('inf')
+        assert isinstance(max_cut_generation_run_time, (float, int)) and \
+               max_cut_generation_run_time >= 0, 'max_cut_generation_run_time is nonnegative'
+        assert isinstance(max_dual_bound, (float, int)), 'max_dual_bound is a number'
 
         self._bound_lp()
+        start = time.process_time()
         while self.lp_feasible and not self.mip_feasible and not self.cut_generation_stalled and \
-                self.cut_generation_iterations < max_cut_generation_iterations:
+                self.cut_generation_iterations < max_cut_generation_iterations and \
+                time.process_time() - start < max_cut_generation_run_time and \
+                self.objective_value < max_dual_bound:
             self._cut_generation_iteration(**kwargs)
+        if self.cut_generation_iterations == max_cut_generation_iterations:
+            # hamstrung by iterations
+            self.cut_generation_terminator = 'max iterations'
+        elif time.process_time() - start >= max_cut_generation_run_time:
+            # hamstrung by time
+            self.cut_generation_terminator = 'time'
+        elif self.objective_value > max_dual_bound:
+            self.cut_generation_terminator = 'dual bound'
         rtn = {
             'total_cut_generation_iterations': total_cut_generation_iterations + self.cut_generation_iterations,
             'total_iterations_gmic_created': total_iterations_gmic_created + self.iterations_gmic_created,
@@ -234,7 +256,7 @@ class BaseNode:
                 return False, f'index {idx} should have dictionary keyed by range of ints'
         return True, None
 
-    def _bound_lp(self: T) -> None:
+    def _bound_lp(self: T, track_dual_bound: bool = False) -> None:
         """Solve the current node with simplex to generate a bound on objective
         values of integer feasible solutions of descendent nodes. If feasible,
         save the run solution.
@@ -243,7 +265,8 @@ class BaseNode:
         algorithm expects
         """
         assert self._x_only_variable, 'x must be our only variable'
-        if self.track_dual_bound:
+        assert isinstance(track_dual_bound, bool), 'track_dual_bound is boolean'
+        if track_dual_bound:
             assert self.tracked_cut_generation_iterations not in self.cut_generation_dual_bound, \
                 'lp is only bound once per cut generation iteration'
 
@@ -258,13 +281,17 @@ class BaseNode:
         int_var_vals = None if not self.lp_feasible else self.solution[self._integer_indices]
         self.mip_feasible = self.lp_feasible and \
             np.max(np.abs(np.round(int_var_vals) - int_var_vals)) <= variable_epsilon
-        if self.track_dual_bound:
+        if track_dual_bound:
             self.cut_generation_dual_bound[self.tracked_cut_generation_iterations] = \
                 self.objective_value
+        # check if a solution becomes infeasible
+        # if re.search('Disjunctive', str(type(self))):
+        #     check_solution(sol=[0, 0, 0, 1.5, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0.75, 0.02777778],
+        #                    lp=self.lp)
 
     def _cut_generation_iteration(self: T, cutting_plane_progress_tolerance:
                                   float = cutting_plane_progress_tolerance,
-                                  **kwargs: Any) -> None:
+                                  track_dual_bound: bool = False, **kwargs: Any) -> None:
         """ Generate cuts to refine the current LP relaxation.
 
         :param cutting_plane_progress_tolerance: relative improvement in objective
@@ -277,21 +304,24 @@ class BaseNode:
         assert isinstance(cutting_plane_progress_tolerance, float) \
             and cutting_plane_progress_tolerance > 0, \
             'cutting_plane_progress_tolerance must be positive'
+        assert isinstance(track_dual_bound, bool), 'track_dual_bound is boolean'
 
         # bring up anything close to 0 to avoid numerical errors
         self.solution = np.maximum(self.solution, 0)
         self.cut_generation_iterations += 1
-        if self.track_dual_bound:
+        if track_dual_bound:
             self.tracked_cut_generation_iterations += 1
         prev_objective_value = self.objective_value
 
         self._remove_slack_cuts(**kwargs)
         self.cut_pool = {**self.cut_pool, **self._generate_cuts(**kwargs)}
         self._select_cuts(**kwargs)
-        self._bound_lp()
+        self._bound_lp(track_dual_bound=track_dual_bound)
         if abs(prev_objective_value - self.objective_value)/abs(prev_objective_value) < \
                 cutting_plane_progress_tolerance:
             self.cut_generation_stalled = True
+            # hamstrung by progress tolerance if nothing else has hit it to this point
+            self.cut_generation_terminator = self.cut_generation_terminator or 'cuts not deep enough'
 
     def _remove_slack_cuts(self: T, **kwargs) -> List[str]:
         """ Removes all previously added cutting planes with 0 dual value. I.e.
@@ -392,6 +422,15 @@ class BaseNode:
                       0 < nonzero_coefs(pi) <= max_nonzero_coefs}
         added_cuts = {}
 
+        if not cut_depths:
+            self.cut_generation_terminator = 'no cuts'
+        elif min(cut_depths.values()) >= 0:
+            # hamstrung by rounding cut coefs
+            self.cut_generation_terminator = 'no improving cuts'
+        elif min(cut_depths.values()) >= -min_cut_depth:
+            # hamstrung by cut depth
+            self.cut_generation_terminator = 'no sufficient cuts'
+
         # add cuts in order of depth of violation
         for idx in sorted(cut_depths, key=cut_depths.get):
             # if cuts are no longer violated by current optimal solution, break
@@ -414,7 +453,9 @@ class BaseNode:
             if not parallel_cut:
                 # uncomment to check if cut is valid
                 # check_cut_against_grid(lp=self.lp, pi=pi, pi0=pi0, max_val=5)
-                # check_cut(sol=[0, 0, 0, 0], lp=self.lp, pi=pi, pi0=pi0)
+                # check_cut(sol=[0, 0, 0, 0.95925926, 0.31111111, 0.4, 1.18847737,
+                #                0, 0, 0, 0, 0.875, 0, 0.45185185, 0.3125, 0.46527778],
+                #           lp=self.lp, pi=pi, pi0=pi0)
                 cut = pi * self.lp.getVarByName('x') >= pi0
                 self.lp.addConstraint(cut, idx)
                 added_cuts[idx] = (pi, pi0)
