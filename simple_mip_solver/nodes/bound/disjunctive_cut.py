@@ -199,7 +199,7 @@ class DisjunctiveCutBoundNode(BaseNode):
 
     def branch(self: G, cglp_cumulative_constraints: bool = False,
                cglp_cumulative_bounds: bool = False, cglp: CutGeneratingLP = None,
-               **kwargs: Any) -> Dict[str, Any]:
+               force_create_cglp: bool = False, **kwargs: Any) -> Dict[str, Any]:
         """Before calling parent and sibling class branch methods, create the
         cglp instance for each child node. Note, if the user sets either
         cglp_cumulative_constraints or cglp_cumulative_bounds to True, cuts
@@ -211,7 +211,10 @@ class DisjunctiveCutBoundNode(BaseNode):
         region of each disjunctive term in the CGLP with the bounds placed on each
         variable in this node
         :param cglp: Pulls 'cglp' from kwargs used to create root DisjunctiveCutBoundNode
-        as to not interfere with cglp assignment in called subroutines
+        as to not interfere with cglp assignment in called subroutines. Is not used.
+        :param force_create_cglp: Pulls 'force_create_cglp' from kwargs used to
+        create root DisjunctiveCutBoundNode as to not interfere with force_create_cglp
+        assignment in called subroutines. Is not used.
         :param kwargs: dictionary of arguments to pass on to selected subroutines
         :return: dictionary of children nodes
         """
@@ -220,7 +223,7 @@ class DisjunctiveCutBoundNode(BaseNode):
 
         # don't pass on cglp if this node didn't use the cut
         if self.cglp is None or not self.current_node_added_cglp:
-            return super().branch(force_create_cglp=self.force_create_cglp, **kwargs)
+            return super().branch(**kwargs)
 
         elif cglp_cumulative_constraints or cglp_cumulative_bounds:
             A = None if not cglp_cumulative_constraints else self.lp.coefMatrix.copy()
@@ -230,9 +233,11 @@ class DisjunctiveCutBoundNode(BaseNode):
 
             cglp = CutGeneratingLP(bb=self.cglp.bb, root_id=self.cglp.root_id,
                                    A=A, b=b, var_lb=var_lb, var_ub=var_ub)
+            # children copy parents for force create
             return super().branch(cglp=cglp, force_create_cglp=self.force_create_cglp, **kwargs)
 
         else:
             # if recycling CGLP, pass on basis because children solutions wont be far off
+            # children copy parents for force create
             return super().branch(cglp=self.cglp, prev_cglp_basis=self.cglp.lp.getBasisStatus(),
                                   force_create_cglp=self.force_create_cglp, **kwargs)

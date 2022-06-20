@@ -73,8 +73,7 @@ class TestModels(unittest.TestCase):
             self.assertTrue(bb._kwargs['total_iterations_gmic_added'] <=
                             1.5*bb._kwargs['total_iterations_gmic_created'])
 
-    def disjunctive_cut_test_models(self):
-        ratio_run = .1
+    def disjunctive_cut_test_models(self, ratio_run=.1, **input_kwargs):
         count_different = 0
         dif = {}
         self.assertTrue(gu, 'gurobipy needed for this test')
@@ -108,7 +107,8 @@ class TestModels(unittest.TestCase):
                 cglp_bb = BranchAndBound(model, node_limit=8, gomory_cuts=kwargs['gomory_cuts'])
                 cglp_bb.solve()
                 cglp = CutGeneratingLP(cglp_bb, cglp_bb.root_node.idx)
-                bb = BranchAndBound(model, self.Node, cglp=cglp, pseudo_costs={}, **kwargs)
+                bb = BranchAndBound(model, self.Node, cglp=cglp, pseudo_costs={},
+                                    **input_kwargs, **kwargs)
                 bb.solve()
 
                 if not isclose(bb.objective_value, gu_mdl.objVal, abs_tol=.01):

@@ -379,7 +379,7 @@ class TestNode(TestModels):
             rtn = n.branch()
             self.assertTrue(bm.called)
             self.assertFalse(bm.call_args.args)
-            self.assertFalse(bm.call_args.kwargs['force_create_cglp'])
+            self.assertFalse(bm.call_args.kwargs)
             self.assertTrue(rtn == 'rtn', 'should just return what parent branch does')
 
         # cglp cut not added
@@ -390,7 +390,7 @@ class TestNode(TestModels):
             rtn = n.branch()
             self.assertTrue(bm.called)
             self.assertFalse(bm.call_args.args)
-            self.assertFalse(bm.call_args.kwargs['force_create_cglp'])
+            self.assertFalse(bm.call_args.kwargs)
             self.assertTrue(rtn == 'rtn', 'should just return what parent branch does')
 
         # growing cglp
@@ -446,6 +446,9 @@ class TestNode(TestModels):
     # test after fixing branch and bound tests
     def test_zmodels(self):
         self.disjunctive_cut_test_models()
+
+    def test_zmodels_force_create_cglp(self):
+        self.disjunctive_cut_test_models(ratio_run=.01, force_create_cglp=True)
 
 
 if __name__ == '__main__':
