@@ -13,7 +13,7 @@ cut_tolerance = 1e-14
 # maximum number of nonzero coefficients in allowable cut - can be high if no integer coef reqs
 max_nonzero_coefs = 1000000
 
-# number of degrees two cuts are within to be considered too parallel
+# number of degrees two cuts from same round are within to be considered too parallel
 parallel_cut_tolerance = 10
 
 # relative improvement cutting plane algorithm must make to continue

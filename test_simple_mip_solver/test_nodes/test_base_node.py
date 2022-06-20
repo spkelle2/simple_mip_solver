@@ -69,6 +69,7 @@ class TestBaseNode(TestModels):
         self.assertFalse(node.cut_generation_dual_bound)
         self.assertFalse(node.tracked_cut_generation_iterations)
         self.assertFalse(node.cut_generation_terminator)
+        self.assertFalse(node.cut_generation_time)
 
     def test_init_lineage(self):
         node = BaseNode(self.small_branch_std.lp, self.small_branch_std.integerIndices, idx=0)
@@ -328,6 +329,7 @@ class TestBaseNode(TestModels):
         self.assertTrue(node.lp.nConstraints > constrs)
         self.assertTrue(node.mip_feasible)
         self.assertFalse(node.cut_generation_terminator)
+        self.assertTrue(node.cut_generation_time)
         self.assertTrue(rtn['total_iterations_gmic_created'] == 4)
         self.assertTrue(rtn['total_number_gmic_created'] == 7)
         self.assertTrue(rtn['total_iterations_gmic_added'] == 4)

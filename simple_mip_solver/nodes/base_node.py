@@ -106,6 +106,7 @@ class BaseNode:
         self.cut_generation_dual_bound = {}
         self.tracked_cut_generation_iterations = 0
         self.cut_generation_terminator = None
+        self.cut_generation_time = 0
 
         # check formatting
         assert self._sense == '>=', 'must have Ax >= b'
@@ -207,6 +208,7 @@ class BaseNode:
                 time.process_time() - start < max_cut_generation_run_time and \
                 self.objective_value < max_dual_bound:
             self._cut_generation_iteration(**kwargs)
+        self.cut_generation_time += time.process_time() - start
         if self.cut_generation_iterations == max_cut_generation_iterations:
             # hamstrung by iterations
             self.cut_generation_terminator = 'max iterations'
@@ -214,6 +216,7 @@ class BaseNode:
             # hamstrung by time
             self.cut_generation_terminator = 'time'
         elif self.objective_value > max_dual_bound:
+            # hamstrung by dual bound
             self.cut_generation_terminator = 'dual bound'
         rtn = {
             'total_cut_generation_iterations': total_cut_generation_iterations + self.cut_generation_iterations,

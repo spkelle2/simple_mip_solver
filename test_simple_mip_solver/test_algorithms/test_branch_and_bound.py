@@ -20,7 +20,7 @@ from test_simple_mip_solver.example_models import no_branch, small_branch, infea
 from test_simple_mip_solver import example_models
 
 
-skip_longs = False
+skip_longs = True
 
 
 class TestBranchAndBoundTree(unittest.TestCase):
@@ -263,6 +263,11 @@ class TestBranchAndBound(unittest.TestCase):
         # kwargs asserts
         self.assertRaisesRegex(AssertionError, 'saved for later use', BranchAndBound,
                                model=self.small_branch_std, right=-5)
+
+    def test_cut_generation_time(self):
+        bb = BranchAndBound(self.small_branch_std)
+        bb.solve()
+        self.assertTrue(0 < bb.cut_generation_time < bb.solve_time)
 
     def test_current_gap(self):
         bb = BranchAndBound(self.small_branch_std, node_limit=1, gomory_cuts=False)

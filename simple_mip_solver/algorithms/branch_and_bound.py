@@ -201,6 +201,11 @@ class BranchAndBound(BaseAlgorithm):
         return self.tree.subtree_dual_bound(self.root_node.idx)
 
     @property
+    def cut_generation_time(self):
+        return sum(n.attr.get('node').cut_generation_time for n in self.tree.nodes.values()
+                   if self.root_node.idx in n.attr.get('node').lineage)
+
+    @property
     def current_gap(self):
         if self.primal_bound == self.dual_bound == 0:
             gap = 0
