@@ -62,6 +62,7 @@ class DisjunctiveCutBoundNode(BaseNode):
         self.number_cglp_added = 0
         self.number_cglp_removed = 0
         self.force_create_cglp = force_create_cglp
+        self.cglp_init_time = 0
 
     def bound(self: G, total_number_cglp_created: int = 0, total_number_cglp_added: int = 0,
               total_number_cglp_removed: int = 0, **kwargs: Any) -> Dict[str, Any]:
@@ -231,8 +232,9 @@ class DisjunctiveCutBoundNode(BaseNode):
             var_lb = None if not cglp_cumulative_bounds else CyLPArray(self.lp.variablesLower.copy())
             var_ub = None if not cglp_cumulative_bounds else CyLPArray(self.lp.variablesUpper.copy())
 
-            cglp = CutGeneratingLP(bb=self.cglp.bb, root_id=self.cglp.root_id,
+            cglp = CutGeneratingLP(tree=self.cglp.tree, root_id=self.cglp.root_id,
                                    A=A, b=b, var_lb=var_lb, var_ub=var_ub)
+            self.cglp_init_time = cglp.init_time
             # children copy parents for force create
             return super().branch(cglp=cglp, force_create_cglp=self.force_create_cglp, **kwargs)
 

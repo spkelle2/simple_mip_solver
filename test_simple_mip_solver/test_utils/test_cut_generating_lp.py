@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 from simple_mip_solver import BranchAndBound, BaseNode
 from simple_mip_solver.algorithms.base_algorithm import BaseAlgorithm
+from simple_mip_solver.utils.branch_and_bound_tree import BranchAndBoundTree
 from simple_mip_solver.utils.cut_generating_lp import CutGeneratingLP
 from test_simple_mip_solver.example_models import small_branch, small_branch_max, \
     square, generate_random_variety
@@ -28,17 +29,17 @@ class TestCutGeneratingLP(unittest.TestCase):
     def test_init_fails_asserts(self):
         bb = BranchAndBound(self.small_branch_std, BaseNode, gomory_cuts=False)
         bb.solve()
-        self.assertRaisesRegex(AssertionError, 'bb must be a BranchAndBound',
-                               CutGeneratingLP, bb=5, root_id=0)
+        self.assertRaisesRegex(AssertionError, 'must be a BranchAndBoundTree',
+                               CutGeneratingLP, tree=5, root_id=0)
         self.assertRaisesRegex(AssertionError, 'root node of the disjunction must be present',
-                               CutGeneratingLP, bb=bb, root_id=100)
+                               CutGeneratingLP, tree=bb.tree, root_id=100)
 
     def test_init(self):
         bb = BranchAndBound(self.small_branch_std, BaseNode, gomory_cuts=False)
         bb.solve()
         with patch('simple_mip_solver.utils.cut_generating_lp.CutGeneratingLP._create_cglp') as cp:
-            cglp = CutGeneratingLP(bb, bb.root_node.idx)
-            self.assertTrue(cglp.bb is bb)
+            cglp = CutGeneratingLP(bb.tree, bb.root_node.idx)
+            self.assertTrue(cglp.tree is bb.tree)
             self.assertTrue(cglp.root_id == 0)
             self.assertTrue(cp.called)
 
@@ -50,13 +51,22 @@ class TestCutGeneratingLP(unittest.TestCase):
         n = disjunctive_nodes[0]
         n.lp.addVariable('d', 3)
         with patch('simple_mip_solver.utils.cut_generating_lp.CutGeneratingLP._create_cglp') as cp:
-            cglp = CutGeneratingLP(bb, bb.root_node.idx)
+            cglp = CutGeneratingLP(bb.tree, bb.root_node.idx)
         self.assertRaisesRegex(AssertionError, 'Each disjunctive term should have the same variables',
+                               cglp._create_cglp)
+
+        tree = BranchAndBoundTree()
+        root_node = BaseNode(lp=small_branch_max.lp, integer_indices=small_branch_max.lp.integerIndices,
+                             is_leaf=True, idx=0)
+        tree.add_root(root_node.idx, node=root_node)
+        with patch('simple_mip_solver.utils.cut_generating_lp.CutGeneratingLP._create_cglp') as cp:
+            cglp = CutGeneratingLP(tree, root_node.idx)
+        self.assertRaisesRegex(AssertionError, 'all nodes assumed to be of form Ax >= b',
                                cglp._create_cglp)
 
         bb = BranchAndBound(self.small_branch_std, gomory_cuts=False)
         bb.solve()
-        cglp = CutGeneratingLP(bb, bb.root_node.idx)
+        cglp = CutGeneratingLP(bb.tree, bb.root_node.idx)
         A = np.append(-self.small_branch_std.A.copy(), np.matrix([[-1, -1, -1]]), axis=0)
         A_prime = np.append(-self.small_branch_std.A.copy(), np.matrix([[-1], [-1]]), axis=1)
         b = CyLPArray(np.append(-self.small_branch_std.b.copy(), np.array([-3])))
@@ -83,7 +93,7 @@ class TestCutGeneratingLP(unittest.TestCase):
         inf = self.small_branch_std.lp.getCoinInfinity()
         bb = BranchAndBound(self.small_branch_std, gomory_cuts=False)
         bb.solve()
-        cglp = CutGeneratingLP(bb, bb.root_node.idx)
+        cglp = CutGeneratingLP(bb.tree, bb.root_node.idx)
         lp = cglp._create_cglp()
         terminal_nodes = bb.tree.get_leaves(bb.root_node.idx)
         dn = {n.idx: n for n in terminal_nodes if n.lp_feasible is not False}
@@ -149,7 +159,7 @@ class TestCutGeneratingLP(unittest.TestCase):
         inf = self.small_branch_std.lp.getCoinInfinity()
         bb = BranchAndBound(self.small_branch_std, gomory_cuts=False)
         bb.solve()
-        cglp = CutGeneratingLP(bb, root_id=1, depth=1)
+        cglp = CutGeneratingLP(bb.tree, root_id=1, depth=1)
         lp = cglp._create_cglp()
         dn = {n.idx: n for n in bb.tree.get_leaves(subtree_root_id=1, depth=1, keep='feasible')}
 
@@ -226,7 +236,7 @@ class TestCutGeneratingLP(unittest.TestCase):
         inf = square.lp.getCoinInfinity()
         bb = BranchAndBound(square, node_limit=1, gomory_cuts=False)
         bb.solve()
-        cglp = CutGeneratingLP(bb, bb.root_node.idx)
+        cglp = CutGeneratingLP(bb.tree, bb.root_node.idx)
         lp = cglp._create_cglp()
         self.infinite = cglp
         terminal_nodes = bb.tree.get_leaves(bb.root_node.idx)
@@ -302,13 +312,13 @@ class TestCutGeneratingLP(unittest.TestCase):
         inf = self.small_branch_std.lp.getCoinInfinity()
         bb = BranchAndBound(small_branch_max, gomory_cuts=False)
         bb.solve()
-        cglp = CutGeneratingLP(bb, bb.root_node.idx)
+        cglp = CutGeneratingLP(bb.tree, bb.root_node.idx)
         A = np.append(-small_branch_max.A.copy(), np.matrix([[-1, -1, -1]]), axis=0)
         b = CyLPArray(np.append(-small_branch_max.b.copy(), np.array([-3])))
         lb = CyLPArray([1, 0, 0])
         ub = CyLPArray([1, 1, 0])
         lp = cglp._create_cglp(A=A, b=b, var_lb=lb, var_ub=ub)
-        self.new = CutGeneratingLP(bb, bb.root_node.idx, A=A, b=b, var_lb=lb, var_ub=ub)
+        self.new = CutGeneratingLP(bb.tree, bb.root_node.idx, A=A, b=b, var_lb=lb, var_ub=ub)
 
         pi = lp.getVarByName('pi')
         pi0 = lp.getVarByName('pi0')
@@ -352,7 +362,7 @@ class TestCutGeneratingLP(unittest.TestCase):
     def test_solve_fails_asserts(self):
         bb = BranchAndBound(square, gomory_cuts=False)
         bb.solve()
-        cglp = CutGeneratingLP(bb, bb.root_node.idx)
+        cglp = CutGeneratingLP(bb.tree, bb.root_node.idx)
 
         self.assertRaisesRegex(AssertionError, 'x_star must be a CyLPArray',
                                cglp.solve, x_star=[1.5, 2])
@@ -371,7 +381,7 @@ class TestCutGeneratingLP(unittest.TestCase):
     def test_solve(self):
         bb = BranchAndBound(square, gomory_cuts=False)
         bb.solve()
-        cglp = CutGeneratingLP(bb, bb.root_node.idx)
+        cglp = CutGeneratingLP(bb.tree, bb.root_node.idx)
         pi, pi0 = cglp.solve()
 
         # check cut is what we expect, i.e. x1 <= 1 or x2 <= 1
@@ -386,7 +396,7 @@ class TestCutGeneratingLP(unittest.TestCase):
         # try another problem
         bb = BranchAndBound(self.small_branch_std, node_limit=10, gomory_cuts=False)
         bb.solve()
-        cglp = CutGeneratingLP(bb, bb.root_node.idx)
+        cglp = CutGeneratingLP(bb.tree, bb.root_node.idx)
         pi, pi0 = cglp.solve()
 
         # check cut is what we expect, i.e. x3 <= 1
@@ -398,7 +408,7 @@ class TestCutGeneratingLP(unittest.TestCase):
     def test_solve_doesnt_separate(self):
         bb = BranchAndBound(square, gomory_cuts=False)
         bb.solve()
-        cglp = CutGeneratingLP(bb, bb.root_node.idx)
+        cglp = CutGeneratingLP(bb.tree, bb.root_node.idx)
         pi, pi0 = cglp.solve(x_star=CyLPArray([.5, .5]))
         # should still return something - let cut generation algorithm decide what to keeo
         self.assertTrue(pi is not None)
@@ -407,7 +417,7 @@ class TestCutGeneratingLP(unittest.TestCase):
     def test_solve_different_x_star(self):
         bb = BranchAndBound(square, node_limit=1, gomory_cuts=False)
         bb.solve()
-        cglp = CutGeneratingLP(bb, bb.root_node.idx)
+        cglp = CutGeneratingLP(bb.tree, bb.root_node.idx)
         # should shift to cutting off point from above
         pi, pi0 = cglp.solve(x_star=CyLPArray([1.5, 2]))
         self.assertTrue(isclose(pi0, -.75, abs_tol=.01))
@@ -417,13 +427,13 @@ class TestCutGeneratingLP(unittest.TestCase):
     def test_solve_starting_basis(self):
         bb = BranchAndBound(self.small_branch_std, node_limit=10, gomory_cuts=False)
         bb.solve()
-        cglp = CutGeneratingLP(bb, bb.root_node.idx)
+        cglp = CutGeneratingLP(bb.tree, bb.root_node.idx)
         pi, pi0 = cglp.solve()
         basis = cglp.lp.getBasisStatus()
 
         bb = BranchAndBound(self.small_branch_std, node_limit=10, gomory_cuts=False)
         bb.solve()
-        cglp = CutGeneratingLP(bb, bb.root_node.idx)
+        cglp = CutGeneratingLP(bb.tree, bb.root_node.idx)
         pi, pi0 = cglp.solve(starting_basis=basis)
         self.assertTrue(cglp.lp.iteration == 0)
 
@@ -440,7 +450,7 @@ class TestCutGeneratingLP(unittest.TestCase):
             model = MILPInstance(file_name=pth)
             bb = BranchAndBound(model, gomory_cuts=False)
             bb.solve()
-            cglp = CutGeneratingLP(bb=bb, root_id=bb.root_node.idx)
+            cglp = CutGeneratingLP(tree=bb.tree, root_id=bb.root_node.idx)
             pi, pi0 = cglp.solve()
 
             # ensure we cut off the root solution

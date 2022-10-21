@@ -2,6 +2,8 @@ import re
 
 from coinor.cuppy.milpInstance import MILPInstance
 from cylp.py.modeling.CyLPModel import CyLPArray
+from cylp.cy.CyClpSimplex import CyClpSimplex
+from cylp.cy.CyCbcModel import CyCbcModel
 # so pulp and pyomo don't believe reading in flat files is a worthwhile feature
 # so we don't have much of an option here but to use some sort of commercial solver
 try:  # if you don't have gurobipy installed, all tests except those using gurobi will run
@@ -16,6 +18,7 @@ from unittest.mock import patch, PropertyMock
 
 from simple_mip_solver import BaseNode
 from simple_mip_solver.algorithms.base_algorithm import BaseAlgorithm
+from simple_mip_solver.utils.branch_and_bound_tree import BranchAndBoundTree
 from test_simple_mip_solver.example_models import no_branch, small_branch, \
     infeasible, random, unbounded, cut2, cut1, small_branch_copy, cut3, small_branch_max
 from test_simple_mip_solver.helpers import TestModels
@@ -33,6 +36,15 @@ class TestBaseNode(TestModels):
                                  numVars=len(m.lp.objective))
             new_m = BaseAlgorithm._convert_constraints_to_greq(new_m)
             setattr(self, name, new_m)
+
+    def create_prelims(self):
+        # create bnb
+        lp = CyClpSimplex()
+        lp.extractCyLPModel('/Users/sean/coin-or/Data/Sample/p0201.mps')
+        bnb = CyCbcModel(lp)
+        bnb.persistNodes = True
+        bnb.solve()
+        self.tree = BranchAndBoundTree(bnb, lp)
 
     def test_init(self):
         node = BaseNode(self.small_branch_std.lp, self.small_branch_std.integerIndices)
@@ -95,9 +107,6 @@ class TestBaseNode(TestModels):
         self.assertRaisesRegex(AssertionError, 'dual bound must be a float or an int',
                                BaseNode, self.small_branch_std.lp, self.small_branch_std.integerIndices,
                                dual_bound='five')
-        self.assertRaisesRegex(AssertionError, 'none are none or all are none',
-                               BaseNode, self.small_branch_std.lp, self.small_branch_std.integerIndices,
-                               b_dir='up')
         self.assertRaisesRegex(AssertionError, 'branch index corresponds to integer variable if it exists',
                                BaseNode, self.small_branch_std.lp, self.small_branch_std.integerIndices,
                                b_idx=4, b_dir='right', b_val=.5)
@@ -120,16 +129,6 @@ class TestBaseNode(TestModels):
                                BaseNode, lp=self.small_branch_std.lp,
                                integer_indices=self.small_branch_std.integerIndices,
                                idx=0, ancestors=(0,))
-
-        self.assertRaisesRegex(AssertionError, 'must have Ax >= b',
-                               BaseNode, lp=small_branch_max.lp,
-                               integer_indices=small_branch_max.integerIndices)
-        l = self.cut1_std.lp.variablesLower.copy()
-        l[0] = -10
-        self.cut1_std.lp.variablesLower = l
-        self.assertRaisesRegex(AssertionError, 'must have x >= 0 for all variables',
-                               BaseNode, lp=self.cut1_std.lp,
-                               integer_indices=self.cut1_std.integerIndices)
 
     def test_cut_pool_setter_fails_asserts(self):
         node = BaseNode(infeasible.lp, infeasible.integerIndices)
@@ -904,6 +903,79 @@ class TestBaseNode(TestModels):
         s = self.cut2_std.lp.addVariable('s', 1)
         self.cut2_std.lp += s >= CyLPArray([0])
         return BaseNode(self.cut2_std.lp, self.cut2_std.integerIndices, 0)
+
+    def test_relaxed_disjunction(self):
+        self.create_prelims()
+        root = self.tree.nodes[-1].attr['node']
+        n0 = self.tree.nodes[0].attr['node']
+        self.assertTrue(root.relaxed_disjunction(n0))
+        self.assertFalse(n0.relaxed_disjunction(root))
+
+        with patch.object(root, 'assert_same_variables') as asv:
+            root.relaxed_disjunction(n0)
+            self.assertTrue(asv.called)
+
+    def test_different_bounds(self):
+        self.create_prelims()
+        n1 = self.tree.nodes[1].attr['node']
+        n0 = self.tree.nodes[0].attr['node']
+        lbs, ubs = n0.different_bounds(n1)
+        self.assertTrue(np.all(ubs == [97]))
+        self.assertFalse(lbs)
+
+        with patch.object(n0, 'assert_same_variables') as asv:
+            n0.different_bounds(n1)
+            self.assertTrue(asv.called)
+
+    def test_number_different_bounds(self):
+        self.create_prelims()
+        n1 = self.tree.nodes[1].attr['node']
+        n0 = self.tree.nodes[0].attr['node']
+        number = n0.number_different_bounds(n1)
+        self.assertTrue(number == 1)
+
+        with patch.object(n0, 'different_bounds') as db:
+            db.return_value = ([110], [])
+            n0.number_different_bounds(n1)
+            self.assertTrue(db.called)
+
+    def test_disjoint_bounds(self):
+        self.create_prelims()
+        n1 = self.tree.nodes[39].attr['node']
+        n0 = self.tree.nodes[0].attr['node']
+        idxs = n0.disjoint_bounds(n1)
+        self.assertTrue(np.all(idxs == [135]))
+
+        with patch.object(n0, 'assert_same_variables') as asv:
+            n0.disjoint_bounds(n1)
+            self.assertTrue(asv.called)
+
+    def test_is_child(self):
+        self.create_prelims()
+        root = self.tree.nodes[-1].attr['node']
+        n1 = self.tree.nodes[1].attr['node']
+        n0 = self.tree.nodes[0].attr['node']
+
+        self.assertTrue(n1.is_child(root))
+        self.assertTrue(n0.is_child(root))
+        self.assertFalse(root.is_child(n1))
+        self.assertFalse(root.is_child(n0))
+
+        with patch.object(n0, 'different_bounds') as db, \
+                patch.object(root, 'relaxed_disjunction') as rd:
+            rd.return_value = True
+            db.return_value = ([110], [])
+            n0.is_child(root)
+            self.assertTrue(db.called)
+            self.assertTrue(rd.called)
+
+    def test_assert_same_variables(self):
+        self.create_prelims()
+        root = self.tree.nodes[-1].attr['node']
+        n1 = self.tree.nodes[1].attr['node']
+
+        self.assertRaisesRegex(AssertionError, 'should be a BaseNode',
+                               root.assert_same_variables, n1.lp)
 
     Node = BaseNode  # node type to use in base_test_models
 

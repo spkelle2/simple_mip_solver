@@ -4,14 +4,15 @@ channels:
   - https://conda.anaconda.org/gurobi
   - defaults
 dependencies:
-  - coin-or-cbc
+  - cython
+  - pkg-config
+  - scipy
   - future
   - gurobi
   - numpy
   - pandas
   - pip
-  - python=3.8
+  - python
   - pip:
     - coinor-cuppy
-    - cylp
     - coverage

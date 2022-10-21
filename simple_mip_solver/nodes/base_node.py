@@ -29,19 +29,22 @@ class BaseNode:
     def __init__(self: T, lp: CyClpSimplex, integer_indices: List[int], idx: int = None,
                  dual_bound: Union[float, int] = -float('inf'), b_idx: int = None,
                  b_dir: str = None, b_val: float = None, depth: int = 0,
-                 ancestors: tuple = None, *args, **kwargs):
+                 ancestors: tuple = None, is_leaf: bool = True, lp_feasible: bool = None,
+                 *args, **kwargs):
         """
         :param lp: model object simplex is run against. Assumed Ax >= b
         :param integer_indices: indices of variables we aim to find integer solutions
         :param idx: index of this node (e.g. in the branch and bound tree)
         :param dual_bound: starting lower bound on optimal objective value
         assuming minimization problem in this node
-        :param b_idx: index of the branching variable
-        :param b_dir: direction of branching
-        :param b_val: initial value of the branching variable
+        :param b_idx: index of the branching variable to create this node
+        :param b_dir: direction of branching to create this node
+        :param b_val: initial value of the branching variable when creating this node
         :param depth: how deep in the tree this node is
         :param ancestors: tuple of nodes that preceded this node (e.g. were branched
         on to create this node)
+        :param is_leaf: whether or not this node represents a leaf
+        :param is_feasible: if the node is known to be feasible or not (None for unknown)
         :param args: spillover for extra arguments passed by the API not needed for instantiation
         :param kwargs: spillover for extra arguments passed by the API not needed for instantiation
         """
@@ -54,8 +57,6 @@ class BaseNode:
             'indices must be distinct'
         assert isinstance(dual_bound, float) or isinstance(dual_bound, int), \
             'dual bound must be a float or an int'
-        assert (b_dir is None) == (b_idx is None) == (b_val is None), \
-            'none are none or all are none'
         assert b_idx in integer_indices or b_idx is None, \
             'branch index corresponds to integer variable if it exists'
         assert b_dir in ['right', 'left'] or b_dir is None, \
@@ -69,6 +70,8 @@ class BaseNode:
         if ancestors is not None:
             assert isinstance(ancestors, tuple), 'ancestors must be a tuple if provided'
             assert idx not in ancestors, 'idx cannot be an ancestor of itself'
+        assert isinstance(is_leaf, bool), 'is_leaf must be boolean'
+        assert lp_feasible is None or isinstance(lp_feasible, bool), 'lp_feasible must be boolean'
 
         lp.logLevel = 0
         self.lp = lp
@@ -77,7 +80,7 @@ class BaseNode:
         self.dual_bound = dual_bound
         self.objective_value = None
         self.solution = None
-        self.lp_feasible = None
+        self.lp_feasible = lp_feasible
         self.unbounded = None
         self.mip_feasible = None
         self._b_dir = b_dir
@@ -86,7 +89,7 @@ class BaseNode:
         self.depth = depth
         self.search_method = 'best first'
         self.branch_method = 'most fractional'
-        self.is_leaf = True
+        self.is_leaf = is_leaf
         ancestors = ancestors or tuple()
         idx_tuple = (idx,) if idx is not None else tuple()
         self.lineage = ancestors + idx_tuple or None  # test all 4 ways this can pan out
@@ -107,10 +110,6 @@ class BaseNode:
         self.tracked_cut_generation_iterations = 0
         self.cut_generation_terminator = None
         self.cut_generation_time = 0
-
-        # check formatting
-        assert self._sense == '>=', 'must have Ax >= b'
-        assert self._variables_nonnegative, 'must have x >= 0 for all variables'
 
     @property
     def cut_pool(self):
@@ -374,6 +373,9 @@ class BaseNode:
         :return: dictionary of cuts that can be added to the LP relaxation
         """
         assert isinstance(gomory_cuts, bool), 'gomory_cuts is boolean'
+        if gomory_cuts:
+            assert self._sense == '>=', 'must have Ax >= b'
+            assert self._variables_nonnegative, 'must have x >= 0 for all variables'
 
         cut_pool = {}
         if gomory_cuts:
@@ -565,7 +567,7 @@ class BaseNode:
         return furthest_index
 
     def _base_branch(self: T, branch_idx: int, next_node_idx: int = None,
-                     **kwargs: Any) -> Dict[str, T]:
+                     b_val: float = None, **kwargs: Any) -> Dict[str, T]:
         """ Creates two new copies of the node with new bounds placed on the variable
         with index <idx>, one with the variable's lower bound set to the ceiling
         of its current value and another with the variable's upper bound set to
@@ -574,16 +576,21 @@ class BaseNode:
         :param branch_idx: index of variable to branch on
         :param next_node_idx: index that should be assigned to the next node created.
         If left None, assign no indices to both child nodes.
+        :param b_val: If provided, branches x_<branch_idx> on the floor and ceiling of this value
 
         :return: dict of Nodes with the new bounds keyed by direction they branched
         """
         assert self._x_only_variable, 'x must be our only variable'
+        assert branch_idx in self._integer_indices, 'must branch on integer index'
         assert next_node_idx is None or isinstance(next_node_idx, int), \
             'next node index should be integer if provided'
-        assert self.lp_feasible, 'must solve before branching'
-        assert branch_idx in self._integer_indices, 'must branch on integer index'
-        b_val = self.solution[branch_idx]
-        assert self._is_fractional(b_val), "index branched on must be fractional"
+        if b_val is not None:
+            assert(isinstance(b_val, float))
+            self.objective_value = -float('inf')
+        else:
+            assert self.lp_feasible, 'must solve before branching'
+            b_val = self.solution[branch_idx]
+            assert self._is_fractional(b_val), "index branched on must be fractional"
 
         self.is_leaf = False
 
@@ -609,6 +616,7 @@ class BaseNode:
                 )
             lp.objective = self.lp.objective.copy()
             lp.setBasisStatus(*basis)  # warm start
+            lp.copyInIntegerInformation(self.lp.integerInformation.astype(np.uint8))  # integrality
 
         self.children = (next_node_idx, next_node_idx + 1) if next_node_idx is not None else None
 
@@ -711,3 +719,79 @@ class BaseNode:
         :return:
         """
         return len(self.lp.variables) == 1 and self.lp.variables[0].name == 'x'
+
+    def relaxed_disjunction(self, n: T) -> bool:
+        """ True if this node has a more relaxed disjunction on integer variables than node <n>
+
+        :param n: node whose disjunction to determine whether or not is a restriction
+        :return: if this node has a more relaxed disjunction on integer variables than node <n>
+        """
+        self.assert_same_variables(n)
+        return np.all((self.lp.variablesLower <= n.lp.variablesLower)[self.lp.integerIndices]) and \
+               np.all((self.lp.variablesUpper >= n.lp.variablesUpper)[self.lp.integerIndices])
+
+    def different_bounds(self, n: BaseNode) -> Tuple[list[int], list[int]]:
+        """ List the indices where upper and lower bounds of integer variables
+        differ between the LP relaxations for this node and node <n>
+
+        :param n: node to compare to
+        :return: Tuple of (differing lower bound integer indices,
+        differing upper bound integer indices)
+        """
+        self.assert_same_variables(n)
+        return (np.where((self.lp.variablesLower != n.lp.variablesLower) *
+                         self.lp.integerInformation)[0].tolist(),
+                np.where((self.lp.variablesUpper != n.lp.variablesUpper) *
+                         self.lp.integerInformation)[0].tolist())
+
+    def number_different_bounds(self, n: BaseNode) -> int:
+        """ Get the count of indices where upper and lower bounds of integer
+        variables differ between linear programs for two nodes
+
+        :param n: node to compare to
+        :return: number of differing bounds for integer variables
+        """
+        lbs, ubs = self.different_bounds(n)
+        return len(lbs) + len(ubs)
+
+    def disjoint_bounds(self, n: BaseNode) -> list[int]:
+        """ determines the integer variables' indices where disjoint branching
+        decisions were made between LP relaxations for self and node n
+
+        :param n: node to compare to
+        :return: integer variables' indices where disjoint branching decisions were made
+        """
+        self.assert_same_variables(n)
+        return np.where((self.lp.variablesLower > n.lp.variablesUpper) *
+                        self.lp.integerInformation)[0].tolist() + \
+            np.where((self.lp.variablesUpper < n.lp.variablesLower) *
+                     self.lp.integerInformation)[0].tolist()
+
+    def is_child(self, n: BaseNode) -> bool:
+        """ Determines which child - left (branch down) or right (branch up) -
+        self is of node n, if either
+
+        :param n: potential parent node of self
+        :return: 'left', 'right', or None
+        """
+        if not n.relaxed_disjunction(self):  # not an ancestor
+            return False
+        ubs, lbs = self.different_bounds(n)
+        if self._b_dir == 'left' and self._b_idx in ubs:
+            return True
+        elif self._b_dir == 'right' and self._b_idx in lbs:
+            return True
+        else:
+            return False  # ancestor, but didn't branch where expected
+
+    def assert_same_variables(self, n: BaseNode) -> None:
+        """ Asserts the LP relaxations in self and node n have the same variables
+
+        :param n: node to compare to
+        :return: None
+        """
+        assert isinstance(n, BaseNode), 'n should be a BaseNode instance'
+        assert len(self.lp.variablesLower) == len(n.lp.variablesLower), \
+            "both instances should have same number of variables"
+        assert np.all(self.lp.integerInformation == n.lp.integerInformation), \
+            "both instances should have same integer variables"

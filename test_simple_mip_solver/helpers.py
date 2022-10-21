@@ -106,7 +106,7 @@ class TestModels(unittest.TestCase):
                 model = MILPInstance(file_name=pth)
                 cglp_bb = BranchAndBound(model, node_limit=8, gomory_cuts=kwargs['gomory_cuts'])
                 cglp_bb.solve()
-                cglp = CutGeneratingLP(cglp_bb, cglp_bb.root_node.idx)
+                cglp = CutGeneratingLP(cglp_bb.tree, cglp_bb.root_node.idx)
                 bb = BranchAndBound(model, self.Node, cglp=cglp, pseudo_costs={},
                                     **input_kwargs, **kwargs)
                 bb.solve()

@@ -1,16 +1,17 @@
 from cylp.cy.CyClpSimplex import CyClpSimplex, CyLPArray
 import numpy as np
 from scipy.sparse import csc_matrix
+import time
 from typing import Tuple, TypeVar, Iterable, Union
 
-from simple_mip_solver import BranchAndBound
+from simple_mip_solver.utils.branch_and_bound_tree import BranchAndBoundTree
 
 CGLP = TypeVar('CGLP', bound='CutGeneratingLP')
 
 
 class CutGeneratingLP:
 
-    def __init__(self: CGLP, bb: BranchAndBound, root_id: int, A: np.matrix = None,
+    def __init__(self: CGLP, tree: BranchAndBoundTree, root_id: int, A: np.matrix = None,
                  b: CyLPArray = None, var_lb: CyLPArray = None, var_ub: CyLPArray = None,
                  depth: int = None):
         """ Creates an object that can generate a strong cut valid for the
@@ -35,17 +36,20 @@ class CutGeneratingLP:
         If provided, the upper bound on each disjunctive term's variables is updated
         to be min(var_ub, <current ub>). If not, upper bounds are unchanged.
         """
+        init_start = time.time()
+
         # sanity checks
-        assert isinstance(bb, BranchAndBound), 'bb must be a BranchAndBound instance'
-        assert root_id in bb.tree, 'root node of the disjunction must be present in B & B tree'
+        assert isinstance(tree, BranchAndBoundTree), 'tree must be a BranchAndBoundTree instance'
+        assert root_id in tree, 'root node of the disjunction must be present in B & B tree'
         if depth is not None:
             assert isinstance(depth, int) and depth > 0, 'depth is postive integer'
 
-        self.bb = bb
+        self.tree = tree
         self.root_id = root_id
         self.depth = depth
         self.lp = self._create_cglp(A, b, var_lb, var_ub)
         self.cylp_failure = False
+        self.init_time = time.time() - init_start
 
     # test by making sure we get the coef matrix, bounds, and objective we would expect for the given inputs
     # for passing nothing, coef matrix, and bounds
@@ -55,7 +59,7 @@ class CutGeneratingLP:
         or variable bounds of the disjunctive terms' LP relaxations.
 
         See ISE 418 Lecture 13 slide 3, Lecture 14 slide 9, and Lecture 15 slides
-        6-7 for derivation of LP in the model object constructed below
+        6-7 for derivation of LP in the model object constructed below.
 
         :param A: The coefficient matrix to use for each disjunctive term's LP
         relaxation. If None, each disjunctive term will use its existing LP relaxation's
@@ -74,17 +78,19 @@ class CutGeneratingLP:
 
         # get each disjunctive term (fathomed nodes do not expand disjunction, so remove them)
         disjunctive_nodes = {
-            n.idx: n for n in self.bb.tree.get_leaves(self.root_id, depth=self.depth,
-                                                      keep='not infeasible')
+            n.idx: n for n in self.tree.get_leaves(self.root_id, depth=self.depth,
+                                                   keep='not infeasible')
         }
         var_dicts = [{v.name: v.dim for v in n.lp.variables} for n in disjunctive_nodes.values()]
         assert all(var_dicts[0] == d for d in var_dicts), \
             'Each disjunctive term should have the same variables. The feature allowing' \
             ' otherwise remains to be developed.'
+        assert all(n._sense == '>=' for n in disjunctive_nodes.values()), \
+            "all nodes assumed to be of form Ax >= b"
 
         # useful constants
         num_vars = sum(var_dim for var_dim in var_dicts[0].values())
-        root = self.bb.tree.get_node_instances(self.root_id)
+        root = self.tree.get_node_instances(self.root_id)
         assert root.solution is not None, 'root must be solved to create CGLP'
         inf = root.lp.getCoinInfinity()
 

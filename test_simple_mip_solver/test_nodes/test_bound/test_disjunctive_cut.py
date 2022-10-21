@@ -29,7 +29,7 @@ class TestNode(TestModels):
     def test_init_fails_asserts(self):
         bb = BranchAndBound(self.cut1_std)
         bb.solve()
-        cglp = CutGeneratingLP(bb, bb.root_node.idx)
+        cglp = CutGeneratingLP(bb.tree, bb.root_node.idx)
         self.assertRaisesRegex(AssertionError, 'cglp must be CutGeneratingLP instance',
                                DisjunctiveCutBoundNode, cglp=cglp.lp, cut_generating_lp=True,
                                cglp_cumulative_constraints=True, lp=bb.root_node.lp,
@@ -44,7 +44,7 @@ class TestNode(TestModels):
     def test_init(self):
         bb = BranchAndBound(self.cut1_std)
         bb.solve()
-        cglp = CutGeneratingLP(bb, bb.root_node.idx)
+        cglp = CutGeneratingLP(bb.tree, bb.root_node.idx)
         n = DisjunctiveCutBoundNode(lp=bb.root_node.lp, integer_indices=self.cut1_std.integerIndices,
                                     cglp=cglp)
         self.assertTrue(cglp is n.cglp)
@@ -66,7 +66,7 @@ class TestNode(TestModels):
     def test_bound_fails_asserts(self):
         bb = BranchAndBound(self.cut1_std)
         bb.solve()
-        cglp = CutGeneratingLP(bb, bb.root_node.idx)
+        cglp = CutGeneratingLP(bb.tree, bb.root_node.idx)
         node = DisjunctiveCutBoundNode(lp=bb.root_node.lp, integer_indices=self.cut1_std.integerIndices,
                                        cglp=cglp)
         self.assertRaisesRegex(AssertionError, 'is nonnegative integer',
@@ -79,7 +79,7 @@ class TestNode(TestModels):
     def test_bound(self):
         bb = BranchAndBound(self.cut1_std)
         bb.solve()
-        cglp = CutGeneratingLP(bb, bb.root_node.idx)
+        cglp = CutGeneratingLP(bb.tree, bb.root_node.idx)
 
         # check function calls and returns
         node = DisjunctiveCutBoundNode(lp=self.cut1_std.lp,
@@ -111,7 +111,7 @@ class TestNode(TestModels):
     def test_remove_slack_cuts(self):
         bb = BranchAndBound(self.cut1_std)
         bb.solve()
-        cglp = CutGeneratingLP(bb, bb.root_node.idx)
+        cglp = CutGeneratingLP(bb.tree, bb.root_node.idx)
 
         # check function calls and returns
         node = DisjunctiveCutBoundNode(lp=self.cut1_std.lp,
@@ -127,7 +127,7 @@ class TestNode(TestModels):
     def test_generate_cuts_fails_asserts(self):
         bb = BranchAndBound(self.cut1_std)
         bb.solve()
-        cglp = CutGeneratingLP(bb, bb.root_node.idx)
+        cglp = CutGeneratingLP(bb.tree, bb.root_node.idx)
         node = DisjunctiveCutBoundNode(lp=self.cut1_std.lp, integer_indices=self.cut1_std.integerIndices, cglp=cglp)
         self.assertRaisesRegex(AssertionError, 'max_cglp_calls is a nonnegative integer',
                                node._generate_cuts, max_cglp_calls=-1)
@@ -135,7 +135,7 @@ class TestNode(TestModels):
     def test_generate_cuts(self):
         bb = BranchAndBound(self.cut1_std, gomory_cuts=False)
         bb.solve()
-        cglp = CutGeneratingLP(bb, bb.root_node.idx)
+        cglp = CutGeneratingLP(bb.tree, bb.root_node.idx)
         node = DisjunctiveCutBoundNode(lp=self.cut1_std.lp,
                                        integer_indices=self.cut1_std.integerIndices,
                                        cglp=cglp, idx=0)
@@ -210,7 +210,7 @@ class TestNode(TestModels):
     def test_generate_cuts_gets_warm_start_right(self):
         bb = BranchAndBound(self.cut1_std, gomory_cuts=False)
         bb.solve()
-        cglp = CutGeneratingLP(bb, bb.root_node.idx)
+        cglp = CutGeneratingLP(bb.tree, bb.root_node.idx)
         node = DisjunctiveCutBoundNode(lp=self.cut1_std.lp, cglp=cglp, idx=0,
                                        integer_indices=self.cut1_std.integerIndices)
 
@@ -234,7 +234,7 @@ class TestNode(TestModels):
     def test_get_cglp_starting_basis_fails_asserts(self):
         bb = BranchAndBound(self.cut1_std)
         bb.solve()
-        cglp = CutGeneratingLP(bb, bb.root_node.idx)
+        cglp = CutGeneratingLP(bb.tree, bb.root_node.idx)
         node = DisjunctiveCutBoundNode(lp=self.cut1_std.lp, integer_indices=self.cut1_std.integerIndices, cglp=cglp)
         self.assertRaisesRegex(AssertionError, 'warm_start_cglp is boolean',
                                node._get_cglp_starting_basis, warm_start_cglp=None)
@@ -242,7 +242,7 @@ class TestNode(TestModels):
     def test_get_cglp_starting_basis(self):
         bb = BranchAndBound(self.cut1_std)
         bb.solve()
-        cglp = CutGeneratingLP(bb, bb.root_node.idx)
+        cglp = CutGeneratingLP(bb.tree, bb.root_node.idx)
         node = DisjunctiveCutBoundNode(lp=self.cut1_std.lp, integer_indices=self.cut1_std.integerIndices,
                                        cglp=cglp, prev_cglp_basis=(np.array([5]), np.array([5])))
 
@@ -263,7 +263,7 @@ class TestNode(TestModels):
     def test_select_cuts_fails_asserts(self):
         bb = BranchAndBound(self.cut1_std, gomory_cuts=False)
         bb.solve()
-        cglp = CutGeneratingLP(bb, bb.root_node.idx)
+        cglp = CutGeneratingLP(bb.tree, bb.root_node.idx)
         node = DisjunctiveCutBoundNode(lp=self.cut1_std.lp, integer_indices=self.cut1_std.integerIndices, cglp=cglp)
 
         self.assertRaisesRegex(AssertionError, 'cglp_cumulative_constraints is bool',
@@ -274,7 +274,7 @@ class TestNode(TestModels):
     def test_select_cuts(self):
         bb = BranchAndBound(self.cut1_std, gomory_cuts=False)
         bb.solve()
-        cglp = CutGeneratingLP(bb, bb.root_node.idx)
+        cglp = CutGeneratingLP(bb.tree, bb.root_node.idx)
         node = DisjunctiveCutBoundNode(lp=self.cut1_std.lp,
                                        integer_indices=self.cut1_std.integerIndices,
                                        cglp=cglp, idx=0)
@@ -339,7 +339,7 @@ class TestNode(TestModels):
     def test_select_cuts_force_create_cglp(self):
         bb = BranchAndBound(self.cut1_std, gomory_cuts=False)
         bb.solve()
-        cglp = CutGeneratingLP(bb, bb.root_node.idx)
+        cglp = CutGeneratingLP(bb.tree, bb.root_node.idx)
         node = DisjunctiveCutBoundNode(lp=self.cut1_std.lp,
                                        integer_indices=self.cut1_std.integerIndices,
                                        cglp=cglp, idx=0, force_create_cglp=True)
@@ -369,7 +369,7 @@ class TestNode(TestModels):
     def test_branch(self):
         bb = BranchAndBound(self.cut1_std, gomory_cuts=False)
         bb.solve()
-        cglp = CutGeneratingLP(bb, bb.root_node.idx)
+        cglp = CutGeneratingLP(bb.tree, bb.root_node.idx)
 
         # no cglp
         n = DisjunctiveCutBoundNode(lp=self.cut1_std.lp, integer_indices=self.cut1_std.integerIndices)
@@ -396,7 +396,7 @@ class TestNode(TestModels):
         # growing cglp
         bb = BranchAndBound(self.cut1_std)
         bb.solve()
-        cglp = CutGeneratingLP(bb, bb.root_node.idx)
+        cglp = CutGeneratingLP(bb.tree, bb.root_node.idx)
         n = DisjunctiveCutBoundNode(lp=self.cut1_std.lp, integer_indices=self.cut1_std.integerIndices,
                                     cglp=cglp, force_create_cglp=True)
         n._bound_lp()

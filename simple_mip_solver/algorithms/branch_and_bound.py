@@ -1,6 +1,5 @@
 import numpy as np
 from coinor.cuppy.milpInstance import MILPInstance
-from coinor.gimpy.tree import BinaryTree
 from cylp.cy.CyClpSimplex import CyClpSimplex, CyLPArray
 from queue import PriorityQueue
 import time
@@ -9,103 +8,11 @@ from typing import Any, Dict, TypeVar, List, Union, Iterable, Type, Tuple
 from simple_mip_solver.algorithms.base_algorithm import BaseAlgorithm
 from simple_mip_solver.nodes.base_node import BaseNode
 from simple_mip_solver.nodes.branch.pseudo_cost import PseudoCostBranchNode
+from simple_mip_solver.utils.branch_and_bound_tree import BranchAndBoundTree
+from simple_mip_solver.utils.profiler import profile_run_time
 from test_simple_mip_solver.example_models import small_branch
 
 B = TypeVar('B', bound='BranchAndBound')
-
-BT = TypeVar('BT', bound='BranchAndBoundTree')
-
-
-class BranchAndBoundTree(BinaryTree):
-    """Class used to represent the underlying tree structure of branch and bound"""
-
-    def get_leaves(self: BT, subtree_root_id: int, depth: int = None,
-                   keep: str = 'all') -> List[BaseNode]:
-        """ If depth is None, gather all leaves for a subtree rooted at node with
-        id <subtree_root_id>. Otherwise, gather all leaves for a subtree rooted at
-        node with id <subtree_root_id> after descendents more than <depth> edges
-        away have been removed.
-
-        Caution: Could be very slow when used repeatedly on large trees with depth > 1
-
-        :param subtree_root_id: The id of the node that roots our subtree
-        :param depth: Depth beyond which nodes are excluded from the subtree
-        :param keep: Specifies if returned leaves should keep 'all' of those found, only
-        those that are LP 'feasible', or only those with LP's that are 'not infeasible'.
-        :return: the desired leaves of the subtree
-        """
-        assert subtree_root_id in self, 'subtree_root_id must belong to the tree'
-        assert keep in ['all', 'feasible', 'not infeasible'], \
-            "keep is one of 'all', 'feasible', or 'not infeasible'"
-        if depth is not None:
-            assert isinstance(depth, int) and depth >= 0, 'depth is a nonnegative integer'
-            if depth == 0:
-                rtn = self.get_node_instances([subtree_root_id])
-            elif depth == 1:
-                rtn = self.get_node_instances(self.get_children(subtree_root_id))
-            else:
-                # leaves less than <depth> levels away
-                leaves_within_depth = [
-                    n.attr['node'] for n in self.nodes.values() if n.attr['node'].is_leaf
-                    and subtree_root_id in n.attr['node'].lineage[-depth:]
-                ]
-                # nodes <depth> levels away
-                depth_descendents = [
-                    n.attr['node'] for n in self.nodes.values() if
-                    len(n.attr['node'].lineage) >= depth + 1 and
-                    subtree_root_id == n.attr['node'].lineage[-(depth + 1)]
-                ]
-                rtn = leaves_within_depth + depth_descendents
-        else:
-            rtn = [n.attr['node'] for n in self.nodes.values() if n.attr['node'].is_leaf
-                   and subtree_root_id in n.attr['node'].lineage]
-        return rtn if keep == 'all' else [n for n in rtn if n.lp_feasible] if \
-            keep == 'feasible' else [n for n in rtn if n.lp_feasible is not False]
-
-    def get_disjunction(self: BT, subtree_root_id: int) -> Dict[int, Tuple[np.ndarray, np.ndarray]]:
-        """ Return the disjunction encoded in the terminal leaves of the branch
-        and bound subtree rooted at node with id <subtree_root_id>
-
-        :param subtree_root_id: The id of the node that roots our subtree
-        :return: a dictionary keyed by indices of nodes with values as pairs of
-        arrays, (lb, ub), representing the variable bounds on the node with the
-        given index. For x to be a feasible solution, there must be a (lb, ub) value
-        in the dict such that lb <= x <= ub.
-        """
-        return {n.idx: (n.lp.variablesLower.copy(), n.lp.variablesUpper.copy())
-                for n in self.get_leaves(subtree_root_id, keep='not infeasible')}
-
-    def get_node_instances(self: BT, node_ids: Union[int, Iterable[int]]) -> \
-            Union[BaseNode, List[BaseNode]]:
-        is_int = False
-        if isinstance(node_ids, int):
-            is_int = True
-            node_ids = [node_ids]
-        else:
-            assert isinstance(node_ids, Iterable) and not isinstance(node_ids, str), \
-                'node_ids must be an integer or iterable (that is not a string)'
-            node_ids = list(node_ids)
-        missing_ids = set(node_ids) - set(self.nodes)
-        assert not missing_ids, f'the following node_ids are not in the tree: {missing_ids}'
-        instances = [self.nodes[idx].attr.get('node') for idx in node_ids]
-        assert all(instance is not None for instance in instances), \
-            'each vertex in the branch and bound tree must have an attribute for a node instance'
-        return instances if not is_int else instances[0]
-
-    def subtree_dual_bound(self: BT, subtree_root_id: int, depth: int = None) -> \
-            Union[float, int]:
-        """ Finds the dual bound for the branch and bound subtree rooted at node
-        <subtree_root_id> with maximum depth <depth>
-
-        :param subtree_root_id: The id of the node that roots our subtree
-        :param depth: depth beyond the subtree root which nodes are excluded
-        for calculating dual bound
-        :return: the dual bound for the branch and bound subtree rooted at node
-        <subtree_root_id> with maximum depth <depth>
-        """
-        assert subtree_root_id in self, 'subtree_root_id must belong to the tree'
-        return min(n.objective_value if n.objective_value is not None else n.dual_bound
-                   for n in self.get_leaves(subtree_root_id, depth=depth))
 
 
 class BranchAndBound(BaseAlgorithm):
@@ -197,13 +104,16 @@ class BranchAndBound(BaseAlgorithm):
         self.max_run_time = max_run_time
 
     @property
-    def dual_bound(self):
+    def dual_bound(self: B):
         return self.tree.subtree_dual_bound(self.root_node.idx)
 
     @property
     def cut_generation_time(self):
-        return sum(n.attr.get('node').cut_generation_time for n in self.tree.nodes.values()
-                   if self.root_node.idx in n.attr.get('node').lineage)
+        return sum(n.attr.get('node').cut_generation_time for n in self.tree.nodes.values())
+
+    @property
+    def cglp_init_time(self):
+        return sum(getattr(n.attr.get('node'), 'cglp_init_time', 0) for n in self.tree.nodes.values())
 
     @property
     def current_gap(self):
@@ -420,6 +330,22 @@ class BranchAndBound(BaseAlgorithm):
         # rerun and reassign
         new_lp.dual()
         return new_lp
+
+
+class ProfiledBranchAndBoundWarm(BranchAndBound):
+
+    @profile_run_time(run_time_profile_file='post_cutoff_solve_warm.prof',
+                      sort_by='cumtime', lines_to_print=100, strip_dirs=False)
+    def solve(self: B) -> None:
+        super().solve()
+
+
+class ProfiledBranchAndBoundCold(BranchAndBound):
+
+    @profile_run_time(run_time_profile_file='post_cutoff_solve_cold.prof',
+                      sort_by='cumtime', lines_to_print=100, strip_dirs=False)
+    def solve(self: B) -> None:
+        super().solve()
 
 
 if __name__ == '__main__':
