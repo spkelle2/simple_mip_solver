@@ -91,7 +91,7 @@ class CutGeneratingLP:
         # useful constants
         num_vars = sum(var_dim for var_dim in var_dicts[0].values())
         root = self.tree.get_node_instances(self.root_id)
-        assert root.solution is not None, 'root must be solved to create CGLP'
+        # assert root.solution is not None, 'root must be solved to create CGLP'
         inf = root.lp.getCoinInfinity()
 
         # sanity checks
@@ -178,7 +178,7 @@ class CutGeneratingLP:
 
         # set objective: find the deepest cut
         # since pi * x >= pi0 for all x in disjunction, we want min pi * x_star - pi0
-        lp.objective = CyLPArray(root.solution) * pi - pi0
+        # lp.objective = CyLPArray(root.solution) * pi - pi0
 
         return lp
 

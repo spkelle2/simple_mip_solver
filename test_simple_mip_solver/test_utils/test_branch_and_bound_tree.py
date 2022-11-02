@@ -30,7 +30,7 @@ class TestBranchAndBoundTree(unittest.TestCase):
         self.lp.extractCyLPModel('/Users/sean/coin-or/Data/Sample/p0201.mps')
         self.bnb = CyCbcModel(self.lp)
         self.bnb.persistNodes = True
-        self.bnb.solve()
+        self.bnb.solve(arguments=["-preprocess", "off", "-presolve", "off"])
 
     def test_get_leaves_fails_asserts(self):
         bb = BranchAndBound(self.small_branch_std, gomory_cuts=False)

@@ -43,7 +43,7 @@ class TestBaseNode(TestModels):
         lp.extractCyLPModel('/Users/sean/coin-or/Data/Sample/p0201.mps')
         bnb = CyCbcModel(lp)
         bnb.persistNodes = True
-        bnb.solve()
+        bnb.solve(arguments=["-preprocess", "off", "-presolve", "off", "-maxNodes", "4"])
         self.tree = BranchAndBoundTree(bnb, lp)
 
     def test_init(self):
@@ -906,8 +906,8 @@ class TestBaseNode(TestModels):
 
     def test_relaxed_disjunction(self):
         self.create_prelims()
-        root = self.tree.nodes[-1].attr['node']
-        n0 = self.tree.nodes[0].attr['node']
+        root = self.tree.nodes[0].attr['node']
+        n0 = self.tree.nodes[1].attr['node']
         self.assertTrue(root.relaxed_disjunction(n0))
         self.assertFalse(n0.relaxed_disjunction(root))
 
@@ -917,8 +917,8 @@ class TestBaseNode(TestModels):
 
     def test_different_bounds(self):
         self.create_prelims()
-        n1 = self.tree.nodes[1].attr['node']
-        n0 = self.tree.nodes[0].attr['node']
+        n1 = self.tree.nodes[2].attr['node']
+        n0 = self.tree.nodes[1].attr['node']
         lbs, ubs = n0.different_bounds(n1)
         self.assertTrue(np.all(ubs == [97]))
         self.assertFalse(lbs)
@@ -941,8 +941,8 @@ class TestBaseNode(TestModels):
 
     def test_disjoint_bounds(self):
         self.create_prelims()
-        n1 = self.tree.nodes[39].attr['node']
-        n0 = self.tree.nodes[0].attr['node']
+        n1 = self.tree.nodes[6].attr['node']
+        n0 = self.tree.nodes[1].attr['node']
         idxs = n0.disjoint_bounds(n1)
         self.assertTrue(np.all(idxs == [135]))
 
@@ -952,9 +952,9 @@ class TestBaseNode(TestModels):
 
     def test_is_child(self):
         self.create_prelims()
-        root = self.tree.nodes[-1].attr['node']
-        n1 = self.tree.nodes[1].attr['node']
-        n0 = self.tree.nodes[0].attr['node']
+        root = self.tree.nodes[0].attr['node']
+        n1 = self.tree.nodes[2].attr['node']
+        n0 = self.tree.nodes[1].attr['node']
 
         self.assertTrue(n1.is_child(root))
         self.assertTrue(n0.is_child(root))
@@ -971,7 +971,7 @@ class TestBaseNode(TestModels):
 
     def test_assert_same_variables(self):
         self.create_prelims()
-        root = self.tree.nodes[-1].attr['node']
+        root = self.tree.nodes[0].attr['node']
         n1 = self.tree.nodes[1].attr['node']
 
         self.assertRaisesRegex(AssertionError, 'should be a BaseNode',

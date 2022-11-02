@@ -776,7 +776,7 @@ class BaseNode:
         """
         if not n.relaxed_disjunction(self):  # not an ancestor
             return False
-        ubs, lbs = self.different_bounds(n)
+        lbs, ubs = self.different_bounds(n)
         if self._b_dir == 'left' and self._b_idx in ubs:
             return True
         elif self._b_dir == 'right' and self._b_idx in lbs:

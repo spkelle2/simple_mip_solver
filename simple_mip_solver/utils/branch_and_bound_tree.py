@@ -49,38 +49,30 @@ class BranchAndBoundTree(BinaryTree):
         """
         assert self.bnb.persistNodes, 'must persist nodes to rebuild tree'
 
-        # create root node
-        true_root_node = BaseNode(lp=self.root_lp, idx=-1, integer_indices=self.root_lp.integerIndices,
-                                  is_leaf=False)
-        self.add_root(true_root_node.idx, node=true_root_node)
-
-        # get nodes from CBC and mark which were roots
+        # get nodes from CBC
         node_map = {
             n.index: BaseNode(
                 lp=lp, integer_indices=lp.integerIndices, idx=n.index,
                 ancestors=tuple(n.lineage[:-1]), b_idx=n.branchVariable,
-                b_dir=n.branchWay, lp_feasible=n.lpFeasible
+                b_dir=n.branchWay, is_leaf=n.isLeaf, lp_feasible=n.lpFeasible
             )
             for n, lp in self.bnb.nodeMap.items()
         }
         root_nodes = {n.idx: n for n in node_map.values() if len(n.lineage) == 1}
-        assert len(root_nodes) <= 2, 'roots should just be children of true root'
-
-        # check that each root isn't a subtree of another root
-        if len(root_nodes) > 1:
-            for n1, n2 in itertools.combinations(root_nodes.values(), 2):
-                assert n1.disjoint_bounds(n2), \
-                    "Each root node should have a disjoint branching decision"
+        assert len(root_nodes) == 1, 'there should only be one root'
 
         for n in node_map.values():
-            parent_node = true_root_node if n.idx in root_nodes else node_map[n.lineage[-2]]
-            assert parent_node.idx in self.nodes, 'parent node should already be added'
-            assert n.is_child(parent_node), 'CBC branching requirements not met'
-            getattr(self, f'add_{n._b_dir}_child')(n.idx, parent_node.idx, node=n)
+            parent_node = None if len(n.lineage) == 1 else node_map[n.lineage[-2]]
+            if parent_node is None:
+                self.add_root(n.idx, node=n)
+            else:
+                assert parent_node.idx in self.nodes, 'parent node should already be added'
+                assert n.is_child(parent_node), 'CBC branching requirements not met'
+                getattr(self, f'add_{n._b_dir}_child')(n.idx, parent_node.idx, node=n)
 
-        for tree_node_idx in self.nodes:
-            if self.get_children(tree_node_idx) and tree_node_idx in node_map:
-                node_map[tree_node_idx].is_leaf = False
+        # for tree_node_idx in self.nodes:
+        #     if self.get_children(tree_node_idx) and tree_node_idx in node_map:
+        #         node_map[tree_node_idx].is_leaf = False
 
     def get_leaves(self: BT, subtree_root_id: int, depth: int = None,
                    keep: str = 'all') -> List[BaseNode]:
