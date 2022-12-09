@@ -216,7 +216,12 @@ class CutGeneratingLP:
             self.lp.setBasisStatus(*starting_basis)
 
         # solve - use primal since objective is main thing changing in cutting plane method
-        self.lp.primal()
+        try:
+            self.lp.primal()
+        except:
+            print('CLP tripped on its own shoelaces')
+            self.cylp_failure = True
+            return None, None
 
         if self.lp.getStatusCode() in [0, 2]:
             return CyLPArray(self.lp.primalVariableSolution['pi']), \
