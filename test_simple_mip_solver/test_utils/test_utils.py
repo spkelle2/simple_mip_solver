@@ -22,7 +22,8 @@ def check_cut(sol: list, lp: CyClpSimplex, pi: np.ndarray, pi0: float):
 
     To be used in BaseNode._select_cuts"""
     assert not(all((lp.variablesLower <= sol) * (sol <= lp.variablesUpper)) and
-               all(lp.coefMatrix * np.vstack(sol) >= lp.constraintsLower.reshape(-1, 1)) and
+               all((lp.constraintsLower.reshape(-1, 1) <= lp.coefMatrix * np.vstack(sol)) *
+                   (lp.coefMatrix * np.vstack(sol) <= lp.constraintsUpper.reshape(-1, 1))) and
                np.dot(pi, sol) < pi0 - cut_tolerance)
 
 

@@ -188,7 +188,7 @@ class TestBranchAndBoundTree(unittest.TestCase):
         self.create_prelims()
 
         tree = BranchAndBoundTree()
-        tree.bnb, tree.root_lp = self.bnb, self.lp
+        tree.bnb = self.bnb
         tree._build_tree()
 
         # check for each node that parents follow lineage
@@ -207,90 +207,6 @@ class TestBranchAndBoundTree(unittest.TestCase):
                 self.assertFalse(tree.get_children(tree_node.attr['node'].idx))
             else:
                 self.assertTrue(tree.get_children(tree_node.attr['node'].idx))
-
-    def test_tie_node_into_tree(self):
-
-        # # create tree
-        # tree = BranchAndBoundTree()
-        # tree.bnb, tree.root_lp = self.bnb, self.lp
-        # node_map = self.bnb.nodeMap
-        # root_idxs = {n.lineage[0] for n in node_map}
-        # root_node_map = {n: root_lp for n, root_lp in node_map.items() if n.index in root_idxs}
-        #
-        # # test different cases
-        # root_node = list(root_node_map.keys())[0]
-        # root_lp = list(root_node_map.values())[0]
-        # integer_indices = [i for i, integer in enumerate(root_lp.integerInformation) if integer]
-        # n = BaseNode(lp=root_lp, integer_indices=integer_indices, idx=root_node.index,
-        #              ancestors=tuple(root_node.lineage[:-1]), is_leaf=root_node.isLeaf)
-        # tree._tie_node_into_tree(n)
-        pass
-
-    def test_branch_node(self):
-        # root_node = BaseNode(lp=self.lp, idx=-1, integer_indices=self.lp.integerIndices)
-        # tree = BranchAndBoundTree()
-        # tree.add_root(root_node.idx, node=root_node)
-        # child = tree.branch_node(root_node, 0, .5)
-        #
-        # self.assertTrue(len(tree.nodes) == 3)
-        # self.assertTrue(tree.get_left_child(-1).attr['node'] is child['left'])
-        # self.assertTrue(tree.get_right_child(-1).attr['node'] is child['right'])
-        pass
-
-    def test_swap_node_fails_asserts(self):
-        # root_node = BaseNode(lp=self.lp, idx=-1, integer_indices=self.lp.integerIndices)
-        # tree = BranchAndBoundTree()
-        # tree.add_root(root_node.idx, node=root_node)
-        # child = tree.branch_node(root_node, 0, .5)
-        #
-        # self.assertRaisesRegex(AssertionError, 'should have the same integer variable bounds',
-        #                        tree.swap_node, child['left'], child['right'])
-        # self.assertRaisesRegex(AssertionError, 'not set up to replace internal nodes',
-        #                        tree.swap_node, root_node, root_node)
-        pass
-
-    def test_swap_node(self):
-        # root_node = BaseNode(lp=self.lp, idx=-1, integer_indices=self.lp.integerIndices)
-        # tree = BranchAndBoundTree()
-        # tree.add_root(root_node.idx, node=root_node)
-        # child = tree.branch_node(root_node, 0, .5)
-        # other_child = root_node._base_branch(0, 0, .5)
-        # tree.swap_node(child['left'], other_child['left'])
-        # self.assertTrue({0, -1} == {n.idx for n in tree.get_leaves(-1)})
-        pass
-
-    def test_nearest_node_fails_asserts(self):
-        # root_node = BaseNode(lp=self.lp, idx=-1, integer_indices=self.lp.integerIndices)
-        # tree = BranchAndBoundTree()
-        # child = root_node._base_branch(branch_idx=97, next_node_idx=-3, b_val=.5)
-        # tree.add_root(child['left'].idx, node=child['left'])
-        #
-        # self.assertRaisesRegex(AssertionError, 'must be a BaseNode instance',
-        #                        tree.nearest_node, self.lp)
-        # self.assertRaisesRegex(AssertionError, 'no ancestor of n exists',
-        #                        tree.nearest_node, root_node)
-        pass
-
-    def test_nearest_node(self):
-
-        # check if the most number of same branching decisions ignored for ancestor
-        # root_node = BaseNode(lp=self.lp, idx=-1, integer_indices=self.lp.integerIndices)
-        # tree = BranchAndBoundTree()
-        # tree.add_root(root_node.idx, node=root_node)
-        #
-        # first = tree.branch_node(root_node, 0, .5)
-        # second_left = tree.branch_node(first['left'], 1, .5)
-        # third_left = tree.branch_node(second_left['left'], 2, .5)
-        #
-        # second_right = first['right']._base_branch(branch_idx=1,
-        #                                            next_node_idx=min(tree.nodes.keys()) - 2,
-        #                                            b_val=.5)
-        # third_right = second_right['left']._base_branch(branch_idx=2,
-        #                                                 next_node_idx=min(tree.nodes.keys()) - 2,
-        #                                                 b_val=.5)
-        # self.assertTrue(tree.nearest_node(third_right['left']) is first['right'])
-        pass
-
 
 if __name__ == '__main__':
     unittest.main()

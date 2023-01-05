@@ -18,26 +18,17 @@ class BranchAndBoundTree(BinaryTree):
     """Class used to represent the underlying tree structure of branch and bound"""
 
     # assuming the user is smart enough here to match bnb with appropriate root_lp
-    def __init__(self, bnb: CyCbcModel = None, root_lp: CyClpSimplex = None, **kwargs):
+    def __init__(self, bnb: CyCbcModel = None, **kwargs):
         """
 
         :param bnb: The CyCbcModel off which we'll rebuild the branch and bound tree
-        :param root_lp: The CyClpSimplex used to create the bnb CyCbcModel instance
         :param kwargs: options to pass to super classes' inits
         """
 
         super().__init__(**kwargs)
-
-        if bnb is not None and root_lp is not None:
+        if bnb is not None:
             assert isinstance(bnb, CyCbcModel)
-            assert isinstance(root_lp, CyClpSimplex)
-        else:
-            assert bnb is None and root_lp is None, 'bnb and root_lp should both or neither be None'
-
-        self.bnb = bnb
-        self.root_lp = root_lp
-
-        if bnb is not None and root_lp is not None:
+            self.bnb = bnb
             self._build_tree()
 
     def _build_tree(self) -> None:
@@ -69,10 +60,6 @@ class BranchAndBoundTree(BinaryTree):
                 assert parent_node.idx in self.nodes, 'parent node should already be added'
                 assert n.is_child(parent_node), 'CBC branching requirements not met'
                 getattr(self, f'add_{n._b_dir}_child')(n.idx, parent_node.idx, node=n)
-
-        # for tree_node_idx in self.nodes:
-        #     if self.get_children(tree_node_idx) and tree_node_idx in node_map:
-        #         node_map[tree_node_idx].is_leaf = False
 
     def get_leaves(self: BT, subtree_root_id: int, depth: int = None,
                    keep: str = 'all') -> List[BaseNode]:
@@ -161,61 +148,3 @@ class BranchAndBoundTree(BinaryTree):
         assert subtree_root_id in self, 'subtree_root_id must belong to the tree'
         return min(n.objective_value if n.objective_value is not None else n.dual_bound
                    for n in self.get_leaves(subtree_root_id, depth=depth))
-
-    def _tie_node_into_tree(self, input_node: BaseNode) -> None:
-        assert isinstance(input_node, BaseNode), 'input_node must be a BaseNode instance'
-
-        nearest_node = self.nearest_node(input_node)  # closest ancestor already in tree
-        diff_lbs, diff_ubs = nearest_node.different_bounds(input_node)
-
-        # and all other nodes in between the root and n
-        for idx in diff_ubs:
-            child = self.branch_node(nearest_node, idx, input_node.lp.variablesUpper[idx] + .5)
-            nearest_node = child['left']
-
-        for idx in diff_lbs:
-            child = self.branch_node(nearest_node, idx, input_node.lp.variablesLower[idx] - .5)
-            nearest_node = child['right']
-
-        self.swap_node(nearest_node, input_node)
-
-    def branch_node(self, node: BaseNode, idx: int, b_val: float) -> dict[str: BaseNode]:
-        child = node._base_branch(branch_idx=idx, next_node_idx=min(self.nodes.keys()) - 2,
-                                  b_val=b_val)
-        self.add_left_child(child['left'].idx, node.idx, node=child['left'])
-        self.add_right_child(child['right'].idx, node.idx, node=child['right'])
-        return child
-
-    def swap_node(self, out_node: BaseNode, in_node: BaseNode) -> None:
-        """ Replace node <out_node> in the branch and bound tree with node
-        <in_node>
-
-        :param out_node: node to be replaced
-        :param in_node: replacement node
-        :return:
-        """
-        assert not out_node.number_different_bounds(in_node), \
-               "in_node replaces out_node, so they should have the same integer variable bounds"
-        assert not self.get_children(out_node.idx), 'not set up to replace internal nodes'
-        b_dir = 'right' if self.get_node_attr(out_node.idx, 'direction') == 'R' else 'left'
-        self.del_node(out_node.idx)
-        getattr(self, f'add_{b_dir}_child')(in_node.idx, out_node.lineage[-2], node=in_node)
-        in_node.lineage = out_node.lineage[:-1] + in_node.lineage
-
-    def nearest_node(self: BT, n: BaseNode) -> BaseNode:
-        """ finds the closest node in the tree to n in terms of least number of
-        different branching decisions
-
-        :param n: node for which we find the closest node in the branch and bound
-        tree
-        :return: the closest node in the branch and bound tree
-        """
-        assert isinstance(n, BaseNode), 'input_node must be a BaseNode instance'
-        # want to find fewest different bounds while also being an outside approximation
-        different_bounds = {
-            tree_node.name: tree_node.attr['node'].number_different_bounds(n) for tree_node
-            in self.nodes.values() if tree_node.attr['node'].relaxed_disjunction(n)
-        }
-        assert different_bounds, 'no ancestor of n exists in the tree'
-        nearest_node = self.nodes[min(different_bounds, key=different_bounds.get)].attr['node']
-        return nearest_node
